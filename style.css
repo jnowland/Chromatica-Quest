@@ -4,6 +4,11 @@
     box-sizing: border-box;
 }
 
+@font-face {
+    font-family: 'Pixel';
+    src: url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+}
+
 body {
     background-color: #111;
     display: flex;
@@ -15,6 +20,83 @@ body {
     font-family: 'Arial', sans-serif;
 }
 
+/* Start Screen Styles */
+#start-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: #000;
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: opacity 0.5s ease-in-out;
+}
+
+.start-content {
+    text-align: center;
+    color: white;
+    padding: 2rem;
+    border: 2px solid white;
+    background-color: rgba(0, 0, 0, 0.8);
+    max-width: 80%;
+    position: relative;
+}
+
+.start-content::before {
+    content: '';
+    position: absolute;
+    top: -10px;
+    left: -10px;
+    right: -10px;
+    bottom: -10px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    pointer-events: none;
+}
+
+.start-content h1 {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.start-content p {
+    font-size: 1.2rem;
+    margin-bottom: 2rem;
+    opacity: 0.8;
+}
+
+#play-button {
+    background-color: white;
+    color: black;
+    border: none;
+    padding: 1rem 3rem;
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 2px;
+    font-weight: bold;
+}
+
+#play-button:hover {
+    background-color: #ddd;
+    transform: scale(1.05);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+}
+
+#play-button:active {
+    transform: scale(0.98);
+}
+
+.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Game Container Styles */
 .game-container {
     position: relative;
     width: 100vw;
@@ -43,4 +125,69 @@ canvas {
     padding: 8px 15px;
     background-color: rgba(0, 0, 0, 0.7);
     border-radius: 8px;
+}
+
+/* Victory Overlay Styles */
+#victory-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.8);
+    z-index: 200;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+.victory-content {
+    text-align: center;
+    color: white;
+    padding: 2rem;
+    border: 2px solid white;
+    background-color: rgba(0, 0, 0, 0.8);
+    max-width: 80%;
+    position: relative;
+}
+
+.victory-content h2 {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    letter-spacing: 3px;
+    text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+}
+
+.victory-content p {
+    font-size: 1.2rem;
+    margin-bottom: 2rem;
+    opacity: 0.8;
+}
+
+#restart-button {
+    background-color: white;
+    color: black;
+    border: none;
+    padding: 1rem 3rem;
+    font-size: 1.5rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    letter-spacing: 2px;
+    font-weight: bold;
+}
+
+#restart-button:hover {
+    background-color: #ddd;
+    transform: scale(1.05);
+    box-shadow: 0 0 15px rgba(255, 255, 255, 0.5);
+}
+
+#restart-button:active {
+    transform: scale(0.98);
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
 } 

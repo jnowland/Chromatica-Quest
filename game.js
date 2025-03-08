@@ -2,10 +2,13 @@
 let CANVAS_WIDTH = window.innerWidth;
 let CANVAS_HEIGHT = window.innerHeight;
 const GRAVITY = 0.5;
-const JUMP_FORCE = -15;
+const JUMP_FORCE = -20; // Increased from -15 for higher jumps
 const MOVE_SPEED = 5;
-const TOTAL_COLLECTIBLES = 10;
 const COLOR_DRAIN_RADIUS = 150; // Radius of the color-draining effect
+
+// Animation constants
+const WALK_ANIMATION_SPEED = 150; // milliseconds per frame
+const LEG_SWING_ANGLE = Math.PI / 6; // 30 degrees
 
 // City configuration
 const CITY_WIDTH_PERCENTAGE = 100; // Percentage of canvas width
@@ -14,7 +17,7 @@ let cityWidth = (CANVAS_WIDTH * CITY_WIDTH_PERCENTAGE) / 100;
 let cityHeight = (CANVAS_HEIGHT * CITY_HEIGHT_PERCENTAGE) / 100;
 
 // Performance optimization
-const DRAIN_EFFECT_QUALITY = 2; // Higher number = lower quality but better performance (1 = full quality)
+const DRAIN_EFFECT_QUALITY = 3; // Increased from 2 to 3 for better performance
 let lastFrameTime = 0;
 let deltaTime = 0;
 let fpsCounter = 0;
@@ -22,13 +25,19 @@ let fpsTimer = 0;
 let currentFps = 0;
 let showPerformanceStats = false;
 
+// Optimization flags
+let skipFrameCount = 0;
+const PROCESS_EVERY_N_FRAMES = 2; // Only process heavy effects every N frames
+let lastWindowCheckTime = 0;
+const WINDOW_CHECK_INTERVAL = 500; // Only check for windows every 500ms
+
 // Game variables
 let canvas, ctx;
 let player;
 let platforms = [];
-let collectibles = [];
 let colorPercentage = 0;
-let score = 0;
+let drainedPixelCount = 0;
+let totalPixelCount = 0;
 let keys = {};
 let gameStarted = false;
 let cityCanvas = null;
@@ -46,10 +55,18 @@ let sounds = {};
 
 // Game initialization
 window.onload = function() {
+    // Set up the start screen
+    const startScreen = document.getElementById('start-screen');
+    const playButton = document.getElementById('play-button');
+    
+    // Add animated stars to the start screen
+    addStarsToStartScreen(startScreen, 100);
+    
+    // Set up the game canvas
     canvas = document.getElementById('gameCanvas');
     canvas.width = CANVAS_WIDTH;
     canvas.height = CANVAS_HEIGHT;
-    ctx = canvas.getContext('2d');
+    ctx = canvas.getContext('2d', { alpha: false }); // Disable alpha for better performance
     
     // Generate city background
     generateCityBackground();
@@ -63,17 +80,28 @@ window.onload = function() {
     // Create game objects
     createPlayer();
     createPlatforms();
-    createCollectibles();
+    
+    // Calculate total pixel count for progress tracking
+    totalPixelCount = cityWidth * cityHeight;
+    
+    // Play button event listener
+    playButton.addEventListener('click', function() {
+        startScreen.classList.add('hidden');
+        startGame();
+    });
     
     // Event listeners
     window.addEventListener('keydown', function(e) {
         keys[e.key] = true;
         
-        // Start game on any key press
-        if (!gameStarted) {
-            gameStarted = true;
-            sounds.bgMusic.play();
-            gameLoop(0);
+        // Start game on any key press if not already started
+        if (e.key === ' ' || e.key === 'Enter') {
+            if (!gameStarted && startScreen.classList.contains('hidden')) {
+                startGame();
+            } else if (!startScreen.classList.contains('hidden')) {
+                startScreen.classList.add('hidden');
+                startGame();
+            }
         }
         
         // Jump when space, up arrow, or W is pressed
@@ -92,6 +120,8 @@ window.onload = function() {
         if (e.key === 'r' || e.key === 'R') {
             initDrainMap();
             drainTrailPositions = [];
+            drainedPixelCount = 0;
+            updateProgressDisplay();
         }
     });
     
@@ -101,14 +131,69 @@ window.onload = function() {
     
     // Handle window resize
     window.addEventListener('resize', handleResize);
-    
-    // Draw initial screen
-    drawStartScreen();
 };
+
+function startGame() {
+    if (!gameStarted) {
+        gameStarted = true;
+        sounds.bgMusic.play();
+        gameLoop(0);
+        
+        // Initialize progress display
+        updateProgressDisplay();
+    }
+}
+
+function addStarsToStartScreen(startScreen, count) {
+    for (let i = 0; i < count; i++) {
+        const star = document.createElement('div');
+        star.className = 'star';
+        
+        // Random position
+        const x = Math.random() * 100;
+        const y = Math.random() * 100;
+        
+        // Random size
+        const size = Math.random() * 3 + 1;
+        
+        // Random opacity
+        const opacity = Math.random() * 0.5 + 0.3;
+        
+        // Random animation delay
+        const delay = Math.random() * 5;
+        
+        // Apply styles
+        star.style.cssText = `
+            position: absolute;
+            top: ${y}%;
+            left: ${x}%;
+            width: ${size}px;
+            height: ${size}px;
+            background-color: white;
+            border-radius: 50%;
+            opacity: ${opacity};
+            animation: twinkle 5s infinite ${delay}s;
+        `;
+        
+        startScreen.appendChild(star);
+    }
+    
+    // Add the animation to the document
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes twinkle {
+            0% { opacity: 0.3; }
+            50% { opacity: 1; }
+            100% { opacity: 0.3; }
+        }
+    `;
+    document.head.appendChild(style);
+}
 
 function initDrainMap() {
     // Create a map to track which pixels have been drained
     drainMap = new Uint8Array(Math.ceil(cityWidth) * Math.ceil(cityHeight));
+    drainedPixelCount = 0;
 }
 
 function generateCityBackground() {
@@ -274,6 +359,10 @@ function generateCityBackground() {
     }
     
     cityGrayscaleData = imageData;
+    
+    // Calculate the actual number of pixels in the city (excluding transparent pixels)
+    // This gives a more accurate count for progress tracking
+    totalPixelCount = cityWidth * cityHeight;
 }
 
 function handleResize() {
@@ -309,14 +398,6 @@ function adjustPlatforms() {
     for (let i = 1; i < platforms.length; i++) {
         platforms[i].x = platforms[i].originalX * scaleX;
         platforms[i].y = platforms[i].originalY * scaleY;
-    }
-    
-    // Adjust collectibles
-    for (let i = 0; i < collectibles.length; i++) {
-        if (collectibles[i].originalX) {
-            collectibles[i].x = collectibles[i].originalX * scaleX;
-            collectibles[i].y = collectibles[i].originalY * scaleY;
-        }
     }
 }
 
@@ -364,22 +445,38 @@ function createPlayer() {
         color: 'rgba(150, 150, 150, 1)', // Darker grayscale
         isDraining: false, // Track if player is currently draining color
         drainIntensity: 0, // For smooth transition of drain effect
+        facingDirection: 1, // 1 for right, -1 for left
+        isMoving: false, // Track if player is moving
+        walkAnimationTime: 0, // For walk animation timing
         update: function() {
             // Apply gravity
             this.velocityY += GRAVITY;
             
+            // Store previous position and velocity
+            const prevX = this.x;
+            const prevVelocityX = this.velocityX;
+            
             // Apply horizontal movement
             if (keys['ArrowLeft'] || keys['a']) {
                 this.velocityX = -MOVE_SPEED;
+                this.facingDirection = -1;
+                this.isMoving = true;
             } else if (keys['ArrowRight'] || keys['d']) {
                 this.velocityX = MOVE_SPEED;
+                this.facingDirection = 1;
+                this.isMoving = true;
             } else {
                 this.velocityX = 0;
+                this.isMoving = false;
             }
             
-            // Store previous position
-            const prevX = this.x;
-            const prevY = this.y;
+            // Update walk animation time if moving
+            if (this.isMoving && this.canJump) {
+                this.walkAnimationTime += deltaTime;
+            } else if (!this.isMoving) {
+                // Reset animation time when not moving
+                this.walkAnimationTime = 0;
+            }
             
             // Update position
             this.x += this.velocityX;
@@ -401,7 +498,6 @@ function createPlayer() {
             // Check if player is over the city for draining effect
             this.checkDraining();
             
-            // Record player position for drain trail
             // Calculate the center of the player (stick figure)
             const headRadius = 15;
             const bodyLength = this.height - headRadius * 2;
@@ -414,12 +510,18 @@ function createPlayer() {
                 Math.pow(centerY - lastPlayerY, 2)
             );
             
+            // Only update drain trail every few frames or if significant movement
+            const shouldUpdateDrainTrail = 
+                skipFrameCount === 0 || 
+                movementDistance > COLOR_DRAIN_RADIUS * 0.5 || 
+                (prevX !== this.x && prevVelocityX !== this.velocityX);
+            
             // If player has moved significantly or is at a new position
-            if (gameStarted && (movementDistance > 3 || prevX !== this.x || prevY !== this.y)) {
+            if (gameStarted && shouldUpdateDrainTrail) {
                 // For continuous coverage, create intermediate points if moved a lot
                 if (movementDistance > COLOR_DRAIN_RADIUS * 0.3 && lastPlayerX !== 0) {
                     // Create intermediate points for smoother drain trail
-                    const steps = Math.ceil(movementDistance / (COLOR_DRAIN_RADIUS * 0.2));
+                    const steps = Math.min(5, Math.ceil(movementDistance / (COLOR_DRAIN_RADIUS * 0.2)));
                     for (let i = 1; i < steps; i++) {
                         const t = i / steps;
                         const interpX = lastPlayerX + (centerX - lastPlayerX) * t;
@@ -449,7 +551,7 @@ function createPlayer() {
                 });
                 
                 // Limit the number of positions to prevent memory issues
-                if (drainTrailPositions.length > 200) {
+                if (drainTrailPositions.length > 100) {
                     drainTrailPositions.shift(); // Remove oldest position
                 }
                 
@@ -507,7 +609,6 @@ function createPlayer() {
                     );
                     
                     // Normalize distance (0 = center, 1 = far)
-                    // Use the larger dimension for normalization
                     const maxDimension = Math.max(cityWidth, cityHeight);
                     const normalizedDistance = Math.min(1, distanceToCenter / (maxDimension/3));
                     try {
@@ -562,81 +663,207 @@ function createPlayer() {
             const bodyTopY = headCenterY + headRadius;
             const bodyBottomY = bodyTopY + bodyLength;
             
-            // Draw head (circle)
-            ctx.beginPath();
-            ctx.arc(headCenterX, headCenterY, headRadius, 0, Math.PI * 2);
-            ctx.stroke();
+            // Save the context for transformations
+            ctx.save();
             
-            // Draw body (vertical line)
-            ctx.beginPath();
-            ctx.moveTo(headCenterX, bodyTopY);
-            ctx.lineTo(headCenterX, bodyBottomY);
-            ctx.stroke();
-            
-            // Draw legs
-            // Left leg
-            ctx.beginPath();
-            ctx.moveTo(headCenterX, bodyBottomY);
-            ctx.lineTo(headCenterX - legLength, bodyBottomY + legLength);
-            ctx.stroke();
-            
-            // Right leg
-            ctx.beginPath();
-            ctx.moveTo(headCenterX, bodyBottomY);
-            ctx.lineTo(headCenterX + legLength, bodyBottomY + legLength);
-            ctx.stroke();
-            
-            // Draw arms based on jumping state
-            if (isJumping) {
-                // Arms up when jumping (V shape above head)
-                // Left arm
+            if (this.isMoving && !isJumping) {
+                // When walking, draw the character from the side view
+                // Translate to the center of the character
+                ctx.translate(headCenterX, headCenterY);
+                
+                // Flip based on direction
+                if (this.facingDirection === -1) {
+                    ctx.scale(-1, 1);
+                }
+                
+                // Draw side view character
+                
+                // Head (circle)
                 ctx.beginPath();
-                ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
-                ctx.lineTo(headCenterX - armLength, bodyTopY - armLength * 0.8);
+                ctx.arc(0, 0, headRadius, 0, Math.PI * 2);
                 ctx.stroke();
                 
-                // Right arm
+                // Body (vertical line)
                 ctx.beginPath();
-                ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
-                ctx.lineTo(headCenterX + armLength, bodyTopY - armLength * 0.8);
-                ctx.stroke();
-            } else {
-                // Arms down when not jumping (hanging at sides)
-                // Left arm
-                ctx.beginPath();
-                ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
-                ctx.lineTo(headCenterX - armLength, bodyTopY + armLength);
+                ctx.moveTo(0, headRadius);
+                ctx.lineTo(0, headRadius + bodyLength);
                 ctx.stroke();
                 
-                // Right arm
+                // Calculate leg animation
+                const animationPhase = (this.walkAnimationTime % (WALK_ANIMATION_SPEED * 2)) / WALK_ANIMATION_SPEED;
+                let frontLegAngle, backLegAngle;
+                
+                if (animationPhase < 1) {
+                    // First half of animation cycle
+                    frontLegAngle = LEG_SWING_ANGLE * Math.sin(animationPhase * Math.PI);
+                    backLegAngle = -LEG_SWING_ANGLE * Math.sin(animationPhase * Math.PI);
+                } else {
+                    // Second half of animation cycle
+                    frontLegAngle = -LEG_SWING_ANGLE * Math.sin((animationPhase - 1) * Math.PI);
+                    backLegAngle = LEG_SWING_ANGLE * Math.sin((animationPhase - 1) * Math.PI);
+                }
+                
+                // Front leg (visible in side view)
                 ctx.beginPath();
-                ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
-                ctx.lineTo(headCenterX + armLength, bodyTopY + armLength);
+                ctx.moveTo(0, headRadius + bodyLength);
+                const frontLegEndX = Math.sin(frontLegAngle) * legLength;
+                const frontLegEndY = headRadius + bodyLength + Math.cos(frontLegAngle) * legLength;
+                ctx.lineTo(frontLegEndX, frontLegEndY);
                 ctx.stroke();
-            }
-            
-            // Draw face
-            const faceColor = colorPercentage > 0.5 ? 'black' : 'white';
-            ctx.fillStyle = faceColor;
-            
-            // Eyes
-            const eyeSize = 3;
-            ctx.fillRect(headCenterX - headRadius/2, headCenterY - 2, eyeSize, eyeSize);
-            ctx.fillRect(headCenterX + headRadius/2 - eyeSize, headCenterY - 2, eyeSize, eyeSize);
-            
-            // Mouth - smile when jumping, neutral when not
-            ctx.beginPath();
-            ctx.lineWidth = 2; // Thinner line for mouth
-            if (isJumping) {
-                // Happy mouth when jumping
-                ctx.arc(headCenterX, headCenterY + 5, headRadius/2, 0, Math.PI);
+                
+                // Back leg (partially visible in side view)
+                ctx.beginPath();
+                ctx.moveTo(0, headRadius + bodyLength);
+                const backLegEndX = Math.sin(backLegAngle) * legLength * 0.6; // Shorter to show it's behind
+                const backLegEndY = headRadius + bodyLength + Math.cos(backLegAngle) * legLength;
+                ctx.lineTo(backLegEndX, backLegEndY);
+                ctx.stroke();
+                
+                // Arms animation (opposite to legs)
+                const frontArmAngle = -backLegAngle * 0.8; // Opposite to back leg
+                const backArmAngle = -frontLegAngle * 0.8; // Opposite to front leg
+                
+                // Front arm
+                ctx.beginPath();
+                ctx.moveTo(0, headRadius + bodyLength * 0.2);
+                const frontArmEndX = Math.sin(frontArmAngle) * armLength;
+                const frontArmEndY = headRadius + bodyLength * 0.2 + Math.cos(frontArmAngle) * armLength;
+                ctx.lineTo(frontArmEndX, frontArmEndY);
+                ctx.stroke();
+                
+                // Back arm (partially visible)
+                ctx.beginPath();
+                ctx.moveTo(0, headRadius + bodyLength * 0.2);
+                const backArmEndX = Math.sin(backArmAngle) * armLength * 0.4; // Shorter to show it's behind
+                const backArmEndY = headRadius + bodyLength * 0.2 + Math.cos(backArmAngle) * armLength;
+                ctx.lineTo(backArmEndX, backArmEndY);
+                ctx.stroke();
+                
+                // Face (profile view)
+                const faceColor = colorPercentage > 0.5 ? 'black' : 'white';
+                ctx.fillStyle = faceColor;
+                
+                // Single eye (on the side)
+                const eyeSize = 3;
+                ctx.fillRect(headRadius/2 - eyeSize/2, -2, eyeSize, eyeSize);
+                
+                // Profile nose
+                ctx.beginPath();
+                ctx.moveTo(headRadius/2, 0);
+                ctx.lineTo(headRadius/2 + 5, 5);
+                ctx.lineTo(headRadius/2, 10);
+                ctx.stroke();
+                
+                // Mouth (smile or neutral)
+                ctx.beginPath();
+                ctx.lineWidth = 2; // Thinner line for mouth
+                ctx.moveTo(headRadius/2, 8);
+                ctx.lineTo(headRadius/2 + 8, 8);
+                ctx.stroke();
+                ctx.lineWidth = 4; // Restore line width
             } else {
-                // Neutral mouth when not jumping
-                ctx.moveTo(headCenterX - headRadius/3, headCenterY + 5);
-                ctx.lineTo(headCenterX + headRadius/3, headCenterY + 5);
+                // When jumping or standing still, use the front view
+                // Apply facing direction
+                if (this.facingDirection === -1) {
+                    // Flip the character horizontally when facing left
+                    ctx.translate(headCenterX * 2, 0);
+                    ctx.scale(-1, 1);
+                }
+                
+                // Draw head (circle)
+                ctx.beginPath();
+                ctx.arc(headCenterX, headCenterY, headRadius, 0, Math.PI * 2);
+                ctx.stroke();
+                
+                // Draw body (vertical line)
+                ctx.beginPath();
+                ctx.moveTo(headCenterX, bodyTopY);
+                ctx.lineTo(headCenterX, bodyBottomY);
+                ctx.stroke();
+                
+                // Calculate leg animation
+                let leftLegAngle = 0;
+                let rightLegAngle = 0;
+                
+                if (isJumping) {
+                    // Legs spread apart when jumping
+                    leftLegAngle = -LEG_SWING_ANGLE * 0.7;
+                    rightLegAngle = LEG_SWING_ANGLE * 0.7;
+                }
+                
+                // Draw legs with animation
+                // Left leg
+                ctx.beginPath();
+                ctx.moveTo(headCenterX, bodyBottomY);
+                const leftLegEndX = headCenterX + Math.sin(leftLegAngle) * legLength;
+                const leftLegEndY = bodyBottomY + Math.cos(leftLegAngle) * legLength;
+                ctx.lineTo(leftLegEndX, leftLegEndY);
+                ctx.stroke();
+                
+                // Right leg
+                ctx.beginPath();
+                ctx.moveTo(headCenterX, bodyBottomY);
+                const rightLegEndX = headCenterX + Math.sin(rightLegAngle) * legLength;
+                const rightLegEndY = bodyBottomY + Math.cos(rightLegAngle) * legLength;
+                ctx.lineTo(rightLegEndX, rightLegEndY);
+                ctx.stroke();
+                
+                // Draw arms based on jumping state
+                if (isJumping) {
+                    // Arms up when jumping (V shape above head)
+                    // Left arm
+                    ctx.beginPath();
+                    ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
+                    ctx.lineTo(headCenterX - armLength, bodyTopY - armLength * 0.8);
+                    ctx.stroke();
+                    
+                    // Right arm
+                    ctx.beginPath();
+                    ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
+                    ctx.lineTo(headCenterX + armLength, bodyTopY - armLength * 0.8);
+                    ctx.stroke();
+                } else {
+                    // Arms down when not jumping or moving
+                    // Left arm
+                    ctx.beginPath();
+                    ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
+                    ctx.lineTo(headCenterX - armLength * 0.7, bodyTopY + armLength);
+                    ctx.stroke();
+                    
+                    // Right arm
+                    ctx.beginPath();
+                    ctx.moveTo(headCenterX, bodyTopY + bodyLength * 0.2);
+                    ctx.lineTo(headCenterX + armLength * 0.7, bodyTopY + armLength);
+                    ctx.stroke();
+                }
+                
+                // Draw face (front view)
+                const faceColor = colorPercentage > 0.5 ? 'black' : 'white';
+                ctx.fillStyle = faceColor;
+                
+                // Eyes
+                const eyeSize = 3;
+                ctx.fillRect(headCenterX - headRadius/2, headCenterY - 2, eyeSize, eyeSize);
+                ctx.fillRect(headCenterX + headRadius/2 - eyeSize, headCenterY - 2, eyeSize, eyeSize);
+                
+                // Mouth - smile when jumping, neutral when not
+                ctx.beginPath();
+                ctx.lineWidth = 2; // Thinner line for mouth
+                
+                if (isJumping) {
+                    // Happy mouth when jumping
+                    ctx.arc(headCenterX, headCenterY + 5, headRadius/2, 0, Math.PI);
+                } else {
+                    // Neutral mouth when not jumping or moving
+                    ctx.moveTo(headCenterX - headRadius/3, headCenterY + 5);
+                    ctx.lineTo(headCenterX + headRadius/3, headCenterY + 5);
+                }
+                ctx.stroke();
+                ctx.lineWidth = 4; // Restore line width
             }
-            ctx.stroke();
-            ctx.lineWidth = 4; // Restore line width
+            
+            // Restore context after transformations
+            ctx.restore();
             
             // Draw drain effect if active
             if (this.drainIntensity > 0) {
@@ -645,6 +872,7 @@ function createPlayer() {
                 
                 // Draw pulsating drain aura
                 const pulseSize = Math.sin(Date.now() / 200) * 10;
+                // Ensure radius is always positive
                 const radius = Math.max(1, COLOR_DRAIN_RADIUS * this.drainIntensity + pulseSize);
                 
                 const gradient = ctx.createRadialGradient(
@@ -729,75 +957,6 @@ function createPlatforms() {
     }
 }
 
-function createCollectibles() {
-    // Create color orbs
-    const positions = [
-        {x: 230, y: 420},
-        {x: 450, y: 370},
-        {x: 650, y: 320},
-        {x: 350, y: 270},
-        {x: 150, y: 220},
-        {x: 550, y: 170},
-        {x: 700, y: 500},
-        {x: 300, y: 500},
-        {x: 100, y: 500},
-        {x: 400, y: 150}
-    ];
-    
-    const scaleX = CANVAS_WIDTH / 800;
-    const scaleY = CANVAS_HEIGHT / 600;
-    
-    for (let i = 0; i < positions.length; i++) {
-        collectibles.push({
-            x: positions[i].x * scaleX,
-            y: positions[i].y * scaleY,
-            originalX: positions[i].x,
-            originalY: positions[i].y,
-            radius: 15,
-            collected: false,
-            hue: (i * 36) % 360, // Distribute colors around the color wheel
-            animation: 0,
-            draw: function() {
-                if (this.collected) return;
-                
-                // Pulsating animation
-                this.animation += 0.05;
-                const pulse = Math.sin(this.animation) * 2;
-                
-                // Draw glow - darker
-                // Ensure radius is always positive
-                const outerRadius = Math.max(1, this.radius + 10 + pulse);
-                const gradient = ctx.createRadialGradient(
-                    this.x, this.y, 0,
-                    this.x, this.y, outerRadius
-                );
-                
-                // Use darker grayscale for outer glow and hint of color in center
-                const colorIntensity = Math.min(0.2, colorPercentage);
-                gradient.addColorStop(0, `hsla(${this.hue}, 80%, 40%, ${0.6 + colorIntensity})`);
-                gradient.addColorStop(1, 'rgba(50, 50, 50, 0)');
-                
-                ctx.fillStyle = gradient;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, outerRadius, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Draw orb - darker
-                ctx.fillStyle = `hsla(${this.hue}, ${40 + colorPercentage * 40}%, ${30 + colorPercentage * 20}%, 1)`;
-                ctx.beginPath();
-                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
-                ctx.fill();
-                
-                // Draw highlight - more subtle
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-                ctx.beginPath();
-                ctx.arc(this.x - this.radius/3, this.y - this.radius/3, this.radius/4, 0, Math.PI * 2);
-                ctx.fill();
-            }
-        });
-    }
-}
-
 function checkCollisions() {
     // Player-Platform collision
     player.canJump = false;
@@ -820,54 +979,6 @@ function checkCollisions() {
             player.canJump = true;
             player.velocityY = 0;
             player.y = platform.y - (headRadius * 2 + bodyLength);
-        }
-    }
-    
-    // Player-Collectible collision
-    for (let i = 0; i < collectibles.length; i++) {
-        const collectible = collectibles[i];
-        
-        if (!collectible.collected) {
-            // Use the head center for collectible collision
-            const headCenterX = player.x + player.width/2;
-            const headCenterY = player.y + headRadius;
-            
-            const dx = headCenterX - collectible.x;
-            const dy = headCenterY - collectible.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance < headRadius + collectible.radius) {
-                collectible.collected = true;
-                score++;
-                
-                // Update color percentage
-                colorPercentage = score / TOTAL_COLLECTIBLES;
-                
-                // Update score display
-                document.getElementById('score').textContent = `Colors Collected: ${score}/${TOTAL_COLLECTIBLES}`;
-                
-                // Play collect sound
-                sounds.collect.play();
-                
-                // Adjust background music based on color percentage - more subtle evolution
-                const newVolume = 0.4 + (colorPercentage * 0.3);
-                const newRate = 0.95 + (colorPercentage * 0.15);
-                
-                // Smoothly transition to new audio settings
-                sounds.bgMusic.fade(sounds.bgMusic.volume(), newVolume, 1000);
-                
-                // Gradually increase the playback rate for a sense of progression
-                if (colorPercentage > 0.5) {
-                    sounds.bgMusic.rate(newRate);
-                }
-                
-                // Add a subtle filter effect as more colors are collected
-                if (score === Math.floor(TOTAL_COLLECTIBLES / 2)) {
-                    // At halfway point, play a special sound to indicate progress
-                    sounds.collect.play();
-                    sounds.collect.rate(0.8);
-                }
-            }
         }
     }
 }
@@ -965,135 +1076,274 @@ function drawCityWithColorDrainEffect() {
     const cityX = 0; // Start from left edge
     const cityY = CANVAS_HEIGHT - cityHeight;
     
-    // Create an offscreen canvas for manipulation
-    const offscreenCanvas = document.createElement('canvas');
-    offscreenCanvas.width = cityWidth;
-    offscreenCanvas.height = cityHeight;
-    const offCtx = offscreenCanvas.getContext('2d');
-    
-    // Start with the colorful version
-    offCtx.putImageData(cityColorData, 0, 0);
-    
-    // Get image data for manipulation
-    const imageData = offCtx.getImageData(0, 0, cityWidth, cityHeight);
-    const colorData = cityColorData.data;
-    const grayData = cityGrayscaleData.data;
-    const data = imageData.data;
-    
-    // Apply persistent drain effect from drain map first
-    const stepSize = Math.max(1, DRAIN_EFFECT_QUALITY - 1);
-    for (let y = 0; y < cityHeight; y += stepSize) {
-        for (let x = 0; x < cityWidth; x += stepSize) {
-            const mapIndex = Math.floor(y) * Math.ceil(cityWidth) + Math.floor(x);
-            
-            // If this pixel has been drained before
-            if (drainMap[mapIndex] === 1) {
-                const index = (y * cityWidth + x) * 4;
-                
-                // Apply grayscale effect
-                data[index] = grayData[index];
-                data[index + 1] = grayData[index + 1];
-                data[index + 2] = grayData[index + 2];
-                
-                // Apply to surrounding pixels too
-                for (let dy = 0; dy < stepSize && y + dy < cityHeight; dy++) {
-                    for (let dx = 0; dx < stepSize && x + dx < cityWidth; dx++) {
-                        if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
-                        
-                        const nearbyIndex = ((y + dy) * cityWidth + (x + dx)) * 4;
-                        data[nearbyIndex] = grayData[nearbyIndex];
-                        data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
-                        data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
-                    }
-                }
-            }
-        }
+    // Create an offscreen canvas for manipulation if it doesn't exist
+    if (!window.offscreenCityCanvas) {
+        window.offscreenCityCanvas = document.createElement('canvas');
+        window.offscreenCityCanvas.width = cityWidth;
+        window.offscreenCityCanvas.height = cityHeight;
+        window.lastProcessedFrame = -1; // Force processing on first frame
     }
     
-    // Apply current drain effect around player
-    if (gameStarted && player.drainIntensity > 0) {
-        // Calculate player position relative to the city image
+    const offscreenCanvas = window.offscreenCityCanvas;
+    const offCtx = offscreenCanvas.getContext('2d', { alpha: false });
+    
+    // Only process the image data on certain frames to improve performance
+    // But store the result to prevent flickering
+    const shouldProcessHeavyEffects = 
+        window.lastProcessedFrame === -1 || // First frame
+        skipFrameCount === 0 || // Regular processing frame
+        window.lastCityWidth !== cityWidth || // City size changed
+        window.lastCityHeight !== cityHeight; // City size changed
+    
+    // Update size tracking
+    window.lastCityWidth = cityWidth;
+    window.lastCityHeight = cityHeight;
+    
+    if (shouldProcessHeavyEffects) {
+        window.lastProcessedFrame = Date.now();
+        
+        // Start with the colorful version
+        offCtx.putImageData(cityColorData, 0, 0);
+        
+        // Get image data for manipulation
+        const imageData = offCtx.getImageData(0, 0, cityWidth, cityHeight);
+        const colorData = cityColorData.data;
+        const grayData = cityGrayscaleData.data;
+        const data = imageData.data;
+        
+        // Calculate player position relative to the city image for current drain effect
         const headRadius = 15;
         const bodyLength = player.height - headRadius * 2;
         const centerX = player.x + player.width/2;
         const centerY = player.y + headRadius + bodyLength/2;
-        
         const relativeX = centerX - cityX;
         const relativeY = centerY - cityY;
         
-        // Only apply effect if player is near or over the city
-        if (relativeX >= -COLOR_DRAIN_RADIUS && 
-            relativeX <= cityWidth + COLOR_DRAIN_RADIUS && 
-            relativeY >= -COLOR_DRAIN_RADIUS && 
-            relativeY <= cityHeight + COLOR_DRAIN_RADIUS) {
-            
-            // Effective drain radius based on player's drain intensity
-            // Ensure radius is always positive
-            const effectiveRadius = Math.max(1, COLOR_DRAIN_RADIUS * player.drainIntensity);
-            
-            // Apply color-draining effect with optimization
-            // Process fewer pixels for better performance
-            for (let y = 0; y < cityHeight; y += DRAIN_EFFECT_QUALITY) {
-                for (let x = 0; x < cityWidth; x += DRAIN_EFFECT_QUALITY) {
+        // Effective drain radius based on player's drain intensity
+        const effectiveRadius = gameStarted && player.drainIntensity > 0 ? 
+            Math.max(1, COLOR_DRAIN_RADIUS * player.drainIntensity) : 0;
+        
+        // Create a temporary map to track which pixels we've processed
+        // to avoid processing the same pixel multiple times
+        const processedMap = new Uint8Array(Math.ceil(cityWidth) * Math.ceil(cityHeight));
+        
+        // Apply persistent drain effect from drain map first
+        const stepSize = Math.max(1, DRAIN_EFFECT_QUALITY);
+        for (let y = 0; y < cityHeight; y += stepSize) {
+            for (let x = 0; x < cityWidth; x += stepSize) {
+                const mapIndex = Math.floor(y) * Math.ceil(cityWidth) + Math.floor(x);
+                
+                // If this pixel has been drained before
+                if (drainMap[mapIndex] === 1) {
                     const index = (y * cityWidth + x) * 4;
                     
-                    // Calculate distance from player
-                    const dx = x - relativeX;
-                    const dy = y - relativeY;
-                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    // Apply grayscale effect
+                    data[index] = grayData[index];
+                    data[index + 1] = grayData[index + 1];
+                    data[index + 2] = grayData[index + 2];
                     
-                    // Apply effect based on distance
-                    if (distance < effectiveRadius) {
-                        // Inside the drain radius - fully grayscale
-                        data[index] = grayData[index];
-                        data[index + 1] = grayData[index + 1];
-                        data[index + 2] = grayData[index + 2];
-                        
-                        // Apply the same effect to nearby pixels (optimization)
-                        if (DRAIN_EFFECT_QUALITY > 1) {
-                            for (let dy = 0; dy < DRAIN_EFFECT_QUALITY && y + dy < cityHeight; dy++) {
-                                for (let dx = 0; dx < DRAIN_EFFECT_QUALITY && x + dx < cityWidth; dx++) {
-                                    if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
-                                    
-                                    const nearbyIndex = ((y + dy) * cityWidth + (x + dx)) * 4;
-                                    data[nearbyIndex] = grayData[nearbyIndex];
-                                    data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
-                                    data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
-                                }
-                            }
-                        }
-                        
-                        // Also update the drain map for persistence
-                        const mapIndex = Math.floor(y) * Math.ceil(cityWidth) + Math.floor(x);
-                        drainMap[mapIndex] = 1;
-                    } else if (distance < effectiveRadius * 1.5) {
-                        // Transition zone - blend between grayscale and color
-                        const blend = (distance - effectiveRadius) / (effectiveRadius * 0.5);
-                        data[index] = grayData[index] * (1 - blend) + colorData[index] * blend;
-                        data[index + 1] = grayData[index + 1] * (1 - blend) + colorData[index + 1] * blend;
-                        data[index + 2] = grayData[index + 2] * (1 - blend) + colorData[index + 2] * blend;
-                        
-                        // Apply the same effect to nearby pixels (optimization)
-                        if (DRAIN_EFFECT_QUALITY > 1) {
-                            for (let dy = 0; dy < DRAIN_EFFECT_QUALITY && y + dy < cityHeight; dy++) {
-                                for (let dx = 0; dx < DRAIN_EFFECT_QUALITY && x + dx < cityWidth; dx++) {
-                                    if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
-                                    
-                                    const nearbyIndex = ((y + dy) * cityWidth + (x + dx)) * 4;
-                                    data[nearbyIndex] = grayData[nearbyIndex] * (1 - blend) + colorData[nearbyIndex] * blend;
-                                    data[nearbyIndex + 1] = grayData[nearbyIndex + 1] * (1 - blend) + colorData[nearbyIndex + 1] * blend;
-                                    data[nearbyIndex + 2] = grayData[nearbyIndex + 2] * (1 - blend) + colorData[nearbyIndex + 2] * blend;
-                                }
-                            }
+                    // Mark as processed
+                    processedMap[mapIndex] = 1;
+                    
+                    // Apply to surrounding pixels too
+                    for (let dy = 0; dy < stepSize && y + dy < cityHeight; dy++) {
+                        for (let dx = 0; dx < stepSize && x + dx < cityWidth; dx++) {
+                            if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
+                            
+                            const nearbyIndex = ((y + dy) * cityWidth + (x + dx)) * 4;
+                            const nearbyMapIndex = Math.floor(y + dy) * Math.ceil(cityWidth) + Math.floor(x + dx);
+                            
+                            data[nearbyIndex] = grayData[nearbyIndex];
+                            data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
+                            data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
+                            
+                            // Mark as processed
+                            processedMap[nearbyMapIndex] = 1;
                         }
                     }
-                    // Outside effect radius pixels remain unchanged (optimization)
                 }
             }
         }
+        
+        // Apply current drain effect around player
+        if (gameStarted && player.drainIntensity > 0) {
+            // Only apply effect if player is near or over the city
+            if (relativeX >= -COLOR_DRAIN_RADIUS && 
+                relativeX <= cityWidth + COLOR_DRAIN_RADIUS && 
+                relativeY >= -COLOR_DRAIN_RADIUS && 
+                relativeY <= cityHeight + COLOR_DRAIN_RADIUS) {
+                
+                // Calculate bounds to avoid unnecessary calculations
+                const startX = Math.max(0, Math.floor(relativeX - effectiveRadius * 1.5));
+                const endX = Math.min(cityWidth, Math.ceil(relativeX + effectiveRadius * 1.5));
+                const startY = Math.max(0, Math.floor(relativeY - effectiveRadius * 1.5));
+                const endY = Math.min(cityHeight, Math.ceil(relativeY + effectiveRadius * 1.5));
+                
+                // Apply color-draining effect with optimization
+                // Process fewer pixels for better performance
+                for (let y = startY; y < endY; y += DRAIN_EFFECT_QUALITY) {
+                    for (let x = startX; x < endX; x += DRAIN_EFFECT_QUALITY) {
+                        const mapIndex = Math.floor(y) * Math.ceil(cityWidth) + Math.floor(x);
+                        
+                        // Skip if already processed by drain map
+                        if (processedMap[mapIndex] === 1) continue;
+                        
+                        const index = (y * cityWidth + x) * 4;
+                        
+                        // Calculate distance from player
+                        const dx = x - relativeX;
+                        const dy = y - relativeY;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+                        
+                        // Apply effect based on distance
+                        if (distance < effectiveRadius) {
+                            // Inside the drain radius - fully grayscale
+                            data[index] = grayData[index];
+                            data[index + 1] = grayData[index + 1];
+                            data[index + 2] = grayData[index + 2];
+                            
+                            // Apply the same effect to nearby pixels (optimization)
+                            if (DRAIN_EFFECT_QUALITY > 1) {
+                                for (let dy = 0; dy < DRAIN_EFFECT_QUALITY && y + dy < endY; dy++) {
+                                    for (let dx = 0; dx < DRAIN_EFFECT_QUALITY && x + dx < endX; dx++) {
+                                        if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
+                                        
+                                        const nearbyIndex = ((y + dy) * cityWidth + (x + dx)) * 4;
+                                        const nearbyMapIndex = Math.floor(y + dy) * Math.ceil(cityWidth) + Math.floor(x + dx);
+                                        
+                                        // Skip if already processed
+                                        if (processedMap[nearbyMapIndex] === 1) continue;
+                                        
+                                        data[nearbyIndex] = grayData[nearbyIndex];
+                                        data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
+                                        data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
+                                        
+                                        // Mark as processed
+                                        processedMap[nearbyMapIndex] = 1;
+                                    }
+                                }
+                            }
+                            
+                            // Also update the drain map for persistence
+                            drainMap[mapIndex] = 1;
+                            processedMap[mapIndex] = 1;
+                        } else if (distance < effectiveRadius * 1.5) {
+                            // Transition zone - blend between grayscale and color
+                            const blend = (distance - effectiveRadius) / (effectiveRadius * 0.5);
+                            data[index] = grayData[index] * (1 - blend) + colorData[index] * blend;
+                            data[index + 1] = grayData[index + 1] * (1 - blend) + colorData[index + 1] * blend;
+                            data[index + 2] = grayData[index + 2] * (1 - blend) + colorData[index + 2] * blend;
+                            
+                            // Apply the same effect to nearby pixels (optimization)
+                            if (DRAIN_EFFECT_QUALITY > 1) {
+                                for (let dy = 0; dy < DRAIN_EFFECT_QUALITY && y + dy < endY; dy++) {
+                                    for (let dx = 0; dx < DRAIN_EFFECT_QUALITY && x + dx < endX; dx++) {
+                                        if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
+                                        
+                                        const nearbyIndex = ((y + dy) * cityWidth + (x + dx)) * 4;
+                                        const nearbyMapIndex = Math.floor(y + dy) * Math.ceil(cityWidth) + Math.floor(x + dx);
+                                        
+                                        // Skip if already processed
+                                        if (processedMap[nearbyMapIndex] === 1) continue;
+                                        
+                                        data[nearbyIndex] = grayData[nearbyIndex] * (1 - blend) + colorData[nearbyIndex] * blend;
+                                        data[nearbyIndex + 1] = grayData[nearbyIndex + 1] * (1 - blend) + colorData[nearbyIndex + 1] * blend;
+                                        data[nearbyIndex + 2] = grayData[nearbyIndex + 2] * (1 - blend) + colorData[nearbyIndex + 2] * blend;
+                                        
+                                        // Mark as processed
+                                        processedMap[nearbyMapIndex] = 1;
+                                    }
+                                }
+                            }
+                        }
+                        // Outside effect radius pixels remain unchanged (optimization)
+                    }
+                }
+            }
+        }
+        
+        // Apply a final pass to ensure all windows are properly drained
+        // This specifically targets yellow windows that might be missed
+        // Only do this check periodically to improve performance
+        const currentTime = Date.now();
+        if (currentTime - lastWindowCheckTime > WINDOW_CHECK_INTERVAL) {
+            lastWindowCheckTime = currentTime;
+            
+            for (let y = 0; y < cityHeight; y += DRAIN_EFFECT_QUALITY * 2) {
+                for (let x = 0; x < cityWidth; x += DRAIN_EFFECT_QUALITY * 2) {
+                    const index = (y * cityWidth + x) * 4;
+                    const mapIndex = Math.floor(y) * Math.ceil(cityWidth) + Math.floor(x);
+                    
+                    // Skip if already processed
+                    if (processedMap[mapIndex] === 1) continue;
+                    
+                    // Check if this is a yellow window (high red and green, low blue)
+                    const isYellowWindow = data[index] > 200 && data[index + 1] > 200 && data[index + 2] < 100;
+                    
+                    // If it's a yellow window and it's near a drained pixel, drain it too
+                    if (isYellowWindow) {
+                        let nearDrainedPixel = false;
+                        
+                        // Check surrounding pixels
+                        const checkRadius = DRAIN_EFFECT_QUALITY * 2;
+                        for (let dy = -checkRadius; dy <= checkRadius && !nearDrainedPixel; dy += 2) {
+                            for (let dx = -checkRadius; dx <= checkRadius && !nearDrainedPixel; dx += 2) {
+                                if (dx === 0 && dy === 0) continue;
+                                
+                                const ny = y + dy;
+                                const nx = x + dx;
+                                
+                                if (ny >= 0 && ny < cityHeight && nx >= 0 && nx < cityWidth) {
+                                    const nearbyMapIndex = Math.floor(ny) * Math.ceil(cityWidth) + Math.floor(nx);
+                                    if (processedMap[nearbyMapIndex] === 1) {
+                                        nearDrainedPixel = true;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // If near a drained pixel, drain this window too
+                        if (nearDrainedPixel) {
+                            data[index] = grayData[index];
+                            data[index + 1] = grayData[index + 1];
+                            data[index + 2] = grayData[index + 2];
+                            
+                            // Apply to surrounding pixels that might be part of the same window
+                            for (let dy = -2; dy <= 2; dy++) {
+                                for (let dx = -2; dx <= 2; dx++) {
+                                    const ny = y + dy;
+                                    const nx = x + dx;
+                                    
+                                    if (ny >= 0 && ny < cityHeight && nx >= 0 && nx < cityWidth) {
+                                        const nearbyIndex = (ny * cityWidth + nx) * 4;
+                                        const nearbyIsYellow = data[nearbyIndex] > 200 && data[nearbyIndex + 1] > 200 && data[nearbyIndex + 2] < 100;
+                                        
+                                        if (nearbyIsYellow) {
+                                            data[nearbyIndex] = grayData[nearbyIndex];
+                                            data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
+                                            data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
+                                            
+                                            // Update drain map
+                                            const nearbyMapIndex = Math.floor(ny) * Math.ceil(cityWidth) + Math.floor(nx);
+                                            drainMap[nearbyMapIndex] = 1;
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // Update drain map
+                            drainMap[mapIndex] = 1;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Store the processed image data
+        offCtx.putImageData(imageData, 0, 0);
+        window.lastProcessedImageData = imageData;
     }
-    
-    offCtx.putImageData(imageData, 0, 0);
     
     // Draw the resulting image to the main canvas
     ctx.drawImage(offscreenCanvas, cityX, cityY);
@@ -1122,12 +1372,6 @@ function drawPlatforms() {
     }
 }
 
-function drawCollectibles() {
-    for (let i = 0; i < collectibles.length; i++) {
-        collectibles[i].draw();
-    }
-}
-
 function update() {
     player.update();
     checkCollisions();
@@ -1149,48 +1393,21 @@ function draw() {
     // Draw game elements
     drawBackground();
     drawPlatforms();
-    drawCollectibles();
     player.draw();
-    
-    // Draw victory message if all collectibles are collected
-    if (score === TOTAL_COLLECTIBLES) {
-        // Create semi-transparent overlay
-        ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-        
-        // Draw glowing text
-        ctx.shadowColor = 'rgba(150, 200, 255, 0.8)';
-        ctx.shadowBlur = 20;
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-        ctx.font = '40px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText('Color Restored!', CANVAS_WIDTH/2, CANVAS_HEIGHT/2);
-        
-        // Reset shadow for subtitle
-        ctx.shadowBlur = 10;
-        ctx.font = '20px Arial';
-        ctx.fillText('Thank you for playing!', CANVAS_WIDTH/2, CANVAS_HEIGHT/2 + 40);
-        
-        // Add a pulsating effect to encourage replay
-        const pulse = Math.sin(Date.now() / 500) * 0.2 + 0.8;
-        ctx.fillStyle = `rgba(200, 200, 255, ${pulse})`;
-        ctx.shadowBlur = 5;
-        ctx.font = '16px Arial';
-        ctx.fillText('Press F5 to play again', CANVAS_WIDTH/2, CANVAS_HEIGHT/2 + 80);
-    }
     
     // Draw performance stats if enabled
     if (showPerformanceStats) {
         ctx.shadowBlur = 0;
         ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
-        ctx.fillRect(10, 10, 150, 60);
+        ctx.fillRect(10, 10, 200, 80);
         
         ctx.fillStyle = 'white';
         ctx.font = '14px Arial';
         ctx.textAlign = 'left';
         ctx.fillText(`FPS: ${currentFps}`, 20, 30);
         ctx.fillText(`Quality: ${DRAIN_EFFECT_QUALITY === 1 ? 'High' : DRAIN_EFFECT_QUALITY === 2 ? 'Medium' : 'Low'}`, 20, 50);
-        ctx.fillText('Press P to toggle stats', 20, 70);
+        ctx.fillText(`Map Drained: ${Math.floor(colorPercentage * 100)}%`, 20, 70);
+        ctx.fillText('Press P to toggle stats', 20, 90);
     }
 }
 
@@ -1206,6 +1423,9 @@ function gameLoop(timestamp) {
     if (deltaTime > 100) {
         deltaTime = 16.67; // Cap at ~60fps equivalent
     }
+    
+    // Update frame skip counter
+    skipFrameCount = (skipFrameCount + 1) % PROCESS_EVERY_N_FRAMES;
     
     if (gameStarted) {
         update();
@@ -1232,12 +1452,20 @@ function updateDrainMap(x, y, radius) {
         const effectiveRadius = Math.max(1, radius);
         const radiusSquared = effectiveRadius * effectiveRadius;
         
-        // Use a smaller step size for better coverage
-        const stepSize = Math.max(1, DRAIN_EFFECT_QUALITY - 1);
+        // Use a larger step size for better performance
+        const stepSize = Math.max(2, DRAIN_EFFECT_QUALITY);
         
-        // Process pixels for better performance but with better coverage
-        for (let y = 0; y < cityHeight; y += stepSize) {
-            for (let x = 0; x < cityWidth; x += stepSize) {
+        // Calculate bounds to avoid unnecessary calculations
+        const startX = Math.max(0, Math.floor(relativeX - effectiveRadius));
+        const endX = Math.min(cityWidth, Math.ceil(relativeX + effectiveRadius));
+        const startY = Math.max(0, Math.floor(relativeY - effectiveRadius));
+        const endY = Math.min(cityHeight, Math.ceil(relativeY + effectiveRadius));
+        
+        let newDrainedPixels = 0;
+        
+        // Process pixels for better performance with bounds checking
+        for (let y = startY; y < endY; y += stepSize) {
+            for (let x = startX; x < endX; x += stepSize) {
                 // Calculate distance from drain center
                 const dx = x - relativeX;
                 const dy = y - relativeY;
@@ -1245,18 +1473,81 @@ function updateDrainMap(x, y, radius) {
                 
                 if (distanceSquared < radiusSquared) {
                     // Mark this pixel and surrounding pixels as drained
-                    const index = Math.floor(y) * Math.ceil(cityWidth) + Math.floor(x);
-                    drainMap[index] = 1;
+                    const mapIndex = Math.floor(y) * Math.ceil(cityWidth) + Math.floor(x);
+                    
+                    // Only count if not already drained
+                    if (drainMap[mapIndex] !== 1) {
+                        drainMap[mapIndex] = 1;
+                        newDrainedPixels++;
+                    }
                     
                     // Mark surrounding pixels too for better coverage
-                    for (let dy = 0; dy < stepSize && y + dy < cityHeight; dy++) {
-                        for (let dx = 0; dx < stepSize && x + dx < cityWidth; dx++) {
-                            const nearbyIndex = Math.floor(y + dy) * Math.ceil(cityWidth) + Math.floor(x + dx);
-                            drainMap[nearbyIndex] = 1;
+                    for (let dy = 0; dy < stepSize && y + dy < endY; dy++) {
+                        for (let dx = 0; dx < stepSize && x + dx < endX; dx++) {
+                            const nearbyMapIndex = Math.floor(y + dy) * Math.ceil(cityWidth) + Math.floor(x + dx);
+                            
+                            // Only count if not already drained
+                            if (drainMap[nearbyMapIndex] !== 1) {
+                                drainMap[nearbyMapIndex] = 1;
+                                newDrainedPixels++;
+                            }
                         }
                     }
                 }
             }
         }
+        
+        // Update the drained pixel count
+        drainedPixelCount += newDrainedPixels;
+        
+        // Update progress display
+        updateProgressDisplay();
+    }
+}
+
+// Update the progress display
+function updateProgressDisplay() {
+    // Calculate percentage of map covered
+    colorPercentage = drainedPixelCount / totalPixelCount;
+    const percentComplete = Math.min(100, Math.floor(colorPercentage * 100));
+    
+    // Update the score display
+    document.getElementById('score').textContent = `Map Drained: ${percentComplete}%`;
+    
+    // Check for victory - now at 60%
+    if (percentComplete >= 60) {
+        showVictoryMessage();
+    }
+}
+
+// Show victory message
+function showVictoryMessage() {
+    // Create victory overlay if it doesn't exist
+    if (!document.getElementById('victory-overlay')) {
+        const victoryOverlay = document.createElement('div');
+        victoryOverlay.id = 'victory-overlay';
+        victoryOverlay.innerHTML = `
+            <div class="victory-content">
+                <h2>WORLD DRAINED!</h2>
+                <p>You've successfully drained the color from the world.</p>
+                <button id="restart-button">Play Again</button>
+            </div>
+        `;
+        document.body.appendChild(victoryOverlay);
+        
+        // Add restart button functionality
+        document.getElementById('restart-button').addEventListener('click', function() {
+            // Reset the game
+            initDrainMap();
+            drainTrailPositions = [];
+            drainedPixelCount = 0;
+            updateProgressDisplay();
+            
+            // Remove victory overlay
+            document.body.removeChild(victoryOverlay);
+        });
+        
+        // Play victory sound
+        sounds.collect.play();
     }
 } 
