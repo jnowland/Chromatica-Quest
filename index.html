@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chromatica Quest</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- Use CDN for Howler.js instead of node_modules -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
+    
+    <!-- Include game utilities -->
+    <script src="public/js/utils/Constants.js"></script>
+    
+    <!-- Include game entities -->
+    <script src="public/js/entities/Platform.js"></script>
+    <script src="public/js/entities/Laser.js"></script>
+    <script src="public/js/entities/Player.js"></script>
+    <script src="public/js/entities/Dog.js"></script>
+    
+    <!-- Include UI -->
+    <script src="public/js/ui/UI.js"></script>
+    
+    <!-- Include game engine -->
+    <script src="public/js/engine/Game.js"></script>
+    
+    <!-- Include main entry point -->
+    <script src="public/js/main.js"></script>
+</head>
+<body>
+    <div id="start-screen">
+        <div class="start-content">
+            <h1>CHROMATICA QUEST</h1>
+            <p>Restore color to a monochrome world</p>
+            <button id="play-button">PLAY</button>
+        </div>
+    </div>
+    <div class="game-container">
+        <canvas id="gameCanvas"></canvas>
+    </div>
+</body>
+</html> 
