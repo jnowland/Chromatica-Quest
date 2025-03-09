@@ -11,12 +11,13 @@ class Dog {
         this.y = player.y;
         
         // Dog properties
-        this.width = 40;
-        this.height = 40;
+        this.width = 45; // Slightly larger for border collie
+        this.height = 35;
         this.speedX = 0;
         this.speedY = 0;
         this.maxSpeed = 3; // Slower than player for realistic following
-        this.color = '#8B4513'; // Brown color for the dog
+        this.mainColor = '#000000'; // Black main color for border collie
+        this.secondaryColor = '#FFFFFF'; // White secondary color
         
         // Following behavior properties
         this.followDistance = 100; // Distance to maintain from player
@@ -172,64 +173,121 @@ class Dog {
     }
 
     draw(ctx) {
-        // Draw dog body (oval shape)
-        ctx.fillStyle = this.color;
-        
         // Save context for rotation/transformation
         ctx.save();
         ctx.translate(this.x + this.width/2, this.y + this.height/2);
         
-        // Draw body
+        // Draw body (black)
+        ctx.fillStyle = this.mainColor;
         ctx.beginPath();
         ctx.ellipse(0, 0, this.width/2, this.height/3, 0, 0, Math.PI * 2);
         ctx.fill();
         
+        // Draw white chest/belly patch
+        ctx.fillStyle = this.secondaryColor;
+        ctx.beginPath();
+        ctx.ellipse(0, this.height/8, this.width/3, this.height/5, 0, 0, Math.PI);
+        ctx.fill();
+        
         // Draw head
         const headX = this.facingRight ? this.width/3 : -this.width/3;
+        
+        // Black part of head
+        ctx.fillStyle = this.mainColor;
         ctx.beginPath();
         ctx.ellipse(headX, -this.height/6, this.width/4, this.height/4, 0, 0, Math.PI * 2);
         ctx.fill();
         
-        // Draw ears
-        const earX = this.facingRight ? this.width/2 : -this.width/2;
+        // White muzzle/face patch
+        ctx.fillStyle = this.secondaryColor;
+        const muzzleX = this.facingRight ? headX + this.width/8 : headX - this.width/8;
         ctx.beginPath();
-        ctx.ellipse(earX, -this.height/4, this.width/8, this.height/6, 0, 0, Math.PI * 2);
+        ctx.ellipse(muzzleX, -this.height/8, this.width/6, this.height/6, 0, 0, Math.PI * 2);
         ctx.fill();
         
-        // Draw eyes
+        // Draw pointed ears (border collie style)
+        const earBaseX = this.facingRight ? headX + this.width/6 : headX - this.width/6;
+        const earTipX = this.facingRight ? earBaseX + this.width/5 : earBaseX - this.width/5;
+        
+        // Left ear
+        ctx.fillStyle = this.mainColor;
+        ctx.beginPath();
+        ctx.moveTo(earBaseX, -this.height/4);
+        ctx.lineTo(earTipX, -this.height/2);
+        ctx.lineTo(earBaseX - (this.facingRight ? this.width/10 : -this.width/10), -this.height/4);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Eyes
         ctx.fillStyle = 'white';
-        const eyeX = this.facingRight ? this.width/3 + 5 : -this.width/3 - 5;
+        const eyeX = this.facingRight ? headX + this.width/10 : headX - this.width/10;
         ctx.beginPath();
-        ctx.arc(eyeX, -this.height/6, 3, 0, Math.PI * 2);
+        ctx.arc(eyeX, -this.height/5, 3, 0, Math.PI * 2);
         ctx.fill();
         
-        // Draw tail with wagging animation
-        ctx.fillStyle = this.color;
+        // Pupils
+        ctx.fillStyle = 'black';
+        ctx.beginPath();
+        ctx.arc(eyeX + (this.facingRight ? 1 : -1), -this.height/5, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Nose
+        ctx.fillStyle = 'black';
+        const noseX = this.facingRight ? muzzleX + this.width/10 : muzzleX - this.width/10;
+        ctx.beginPath();
+        ctx.arc(noseX, -this.height/10, 2, 0, Math.PI * 2);
+        ctx.fill();
+        
+        // Draw fluffy tail with wagging animation
         const tailX = this.facingRight ? -this.width/2 : this.width/2;
         const tailWagOffset = this.waggingTail ? 5 : -5;
+        
+        // Fluffy tail base
+        ctx.fillStyle = this.mainColor;
+        ctx.beginPath();
+        ctx.moveTo(tailX, 0);
+        
+        // Create a fluffy tail with multiple curves
+        const tailLength = this.facingRight ? -30 : 30;
+        const tailEnd = tailX + tailLength;
         
         ctx.beginPath();
         ctx.moveTo(tailX, 0);
         ctx.quadraticCurveTo(
-            tailX - (this.facingRight ? 15 : -15), 
+            tailX + tailLength/2, 
             -10 + tailWagOffset, 
-            tailX - (this.facingRight ? 25 : -25), 
+            tailEnd, 
             -5
         );
-        ctx.lineWidth = 4;
-        ctx.stroke();
+        ctx.quadraticCurveTo(
+            tailX + tailLength/1.5,
+            5 + tailWagOffset,
+            tailX,
+            0
+        );
+        ctx.fill();
+        
+        // White tip on tail
+        ctx.fillStyle = this.secondaryColor;
+        ctx.beginPath();
+        ctx.arc(tailEnd, -5, 5, 0, Math.PI * 2);
+        ctx.fill();
         
         // Draw legs
         const frontLegX = this.facingRight ? this.width/4 : -this.width/4;
         const backLegX = this.facingRight ? -this.width/4 : this.width/4;
         const legY = this.height/3;
         
-        // Front leg
-        ctx.fillStyle = this.color;
+        // Front leg (black)
+        ctx.fillStyle = this.mainColor;
         ctx.fillRect(frontLegX - 3, legY, 6, this.height/3);
         
-        // Back leg
+        // Back leg (black)
         ctx.fillRect(backLegX - 3, legY, 6, this.height/3);
+        
+        // White socks on front paws
+        ctx.fillStyle = this.secondaryColor;
+        ctx.fillRect(frontLegX - 3, legY + this.height/5, 6, this.height/8);
         
         // Restore context
         ctx.restore();
