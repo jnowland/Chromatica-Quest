@@ -40,22 +40,29 @@ class Dog {
     }
 
     update() {
+        // Only update every other frame for performance
+        if (window.skipDogFrames === undefined) {
+            window.skipDogFrames = 0;
+        }
+        window.skipDogFrames = (window.skipDogFrames + 1) % 2;
+        if (window.skipDogFrames !== 0) return;
+        
         // Check if player has moved significantly
-        const playerMoved = Math.abs(this.player.x - this.lastPlayerX) > 5 || 
-                           Math.abs(this.player.y - this.lastPlayerY) > 5;
+        const playerMoved = Math.abs(this.player.x - this.lastPlayerX) > 10 || 
+                           Math.abs(this.player.y - this.lastPlayerY) > 10;
         
         if (playerMoved) {
             this.idleTime = 0;
             this.isIdle = false;
         } else {
-            this.idleTime += 16; // Assuming ~60fps
+            this.idleTime += 32; // Assuming ~30fps
             if (this.idleTime > 1000) { // 1 second of no movement
                 this.isIdle = true;
             }
         }
         
-        // Update tail wagging
-        this.tailWagTimer += 16;
+        // Update tail wagging less frequently
+        this.tailWagTimer += 32;
         if (this.tailWagTimer > this.tailWagInterval) {
             this.tailWagTimer = 0;
             this.waggingTail = !this.waggingTail;
@@ -91,7 +98,7 @@ class Dog {
         const distance = Math.sqrt(dx * dx + dy * dy);
         
         // Only move if we're not close enough to the target
-        if (distance > 10) {
+        if (distance > 20) {
             // Calculate normalized direction vector
             const dirX = dx / distance;
             const dirY = dy / distance;

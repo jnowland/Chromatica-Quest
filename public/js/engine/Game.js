@@ -414,22 +414,25 @@ class Game {
         if (this.gameState !== 'playing' && this.gameState !== 'level2') return;
         
         // Only process every N frames for performance
-        this.skipFrameCount = (this.skipFrameCount + 1) % DRAIN_EFFECT_QUALITY;
+        if (this.skipFrameCount !== 0) return;
         
         const playerCenterX = this.player.x + this.player.width / 2;
         const playerCenterY = this.player.y + this.player.height / 2;
         
         // Check if player is in a new position
         const distMoved = Math.hypot(playerCenterX - this.lastPlayerX, playerCenterY - this.lastPlayerY);
-        if (distMoved > 5) {
+        if (distMoved > 10) { // Increased threshold from 5 to 10
             this.lastPlayerX = playerCenterX;
             this.lastPlayerY = playerCenterY;
             this.drainTrailPositions.push({ x: playerCenterX, y: playerCenterY });
             
             // Limit the trail length
-            if (this.drainTrailPositions.length > 100) {
+            if (this.drainTrailPositions.length > 50) { // Reduced from 100 to 50
                 this.drainTrailPositions.shift();
             }
+            
+            // Apply drain effect at player position
+            this.applyDrainEffect(playerCenterX, playerCenterY, COLOR_DRAIN_RADIUS);
         }
         
         // Check for victory
@@ -526,7 +529,6 @@ class Game {
         const offCtx = offscreenCanvas.getContext('2d', { alpha: false });
         
         // Only process the image data on certain frames to improve performance
-        // But store the result to prevent flickering
         const shouldProcessHeavyEffects = 
             window.lastProcessedFrame === -1 || // First frame
             this.skipFrameCount === 0 || // Regular processing frame
@@ -561,15 +563,23 @@ class Game {
             const effectiveRadius = this.gameState === 'playing' || this.gameState === 'level2' ? 
                 Math.max(1, COLOR_DRAIN_RADIUS) : 0;
             
-            // Create a temporary map to track which pixels we've processed
-            // to avoid processing the same pixel multiple times
-            const processedMap = new Uint8Array(Math.ceil(this.cityWidth) * Math.ceil(this.cityHeight));
+            // Use a more efficient approach for the drain map
+            // Process in larger chunks for better performance
+            const stepSize = DRAIN_EFFECT_QUALITY;
+            const cityWidthCeil = Math.ceil(this.cityWidth);
+            
+            // Process only a portion of the image each frame for better performance
+            // Divide the image into 4 quadrants and process one per frame
+            const quadrantSize = 4;
+            const currentQuadrant = Math.floor(Date.now() / 200) % quadrantSize;
+            
+            const startY = Math.floor(currentQuadrant * this.cityHeight / quadrantSize);
+            const endY = Math.floor((currentQuadrant + 1) * this.cityHeight / quadrantSize);
             
             // Apply persistent drain effect from drain map first
-            const stepSize = Math.max(1, DRAIN_EFFECT_QUALITY);
-            for (let y = 0; y < this.cityHeight; y += stepSize) {
+            for (let y = startY; y < endY; y += stepSize) {
                 for (let x = 0; x < this.cityWidth; x += stepSize) {
-                    const mapIndex = Math.floor(y) * Math.ceil(this.cityWidth) + Math.floor(x);
+                    const mapIndex = Math.floor(y) * cityWidthCeil + Math.floor(x);
                     
                     // If this pixel has been drained before
                     if (this.drainMap[mapIndex] === 1) {
@@ -580,199 +590,61 @@ class Game {
                         data[index + 1] = grayData[index + 1];
                         data[index + 2] = grayData[index + 2];
                         
-                        // Mark as processed
-                        processedMap[mapIndex] = 1;
-                        
-                        // Apply to surrounding pixels too
-                        for (let dy = 0; dy < stepSize && y + dy < this.cityHeight; dy++) {
-                            for (let dx = 0; dx < stepSize && x + dx < this.cityWidth; dx++) {
+                        // Apply to surrounding pixels too (in a block)
+                        for (let dy = 0; dy < stepSize && y + dy < this.cityHeight; dy += 2) {
+                            for (let dx = 0; dx < stepSize && x + dx < this.cityWidth; dx += 2) {
                                 if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
                                 
                                 const nearbyIndex = ((y + dy) * this.cityWidth + (x + dx)) * 4;
-                                const nearbyMapIndex = Math.floor(y + dy) * Math.ceil(this.cityWidth) + Math.floor(x + dx);
                                 
                                 data[nearbyIndex] = grayData[nearbyIndex];
                                 data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
                                 data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
-                                
-                                // Mark as processed
-                                processedMap[nearbyMapIndex] = 1;
                             }
                         }
                     }
                 }
             }
             
-            // Apply current drain effect around player
-            if ((this.gameState === 'playing' || this.gameState === 'level2')) {
-                // Only apply effect if player is near or over the city
-                if (relativeX >= -COLOR_DRAIN_RADIUS && 
-                    relativeX <= this.cityWidth + COLOR_DRAIN_RADIUS && 
-                    relativeY >= -COLOR_DRAIN_RADIUS && 
-                    relativeY <= this.cityHeight + COLOR_DRAIN_RADIUS) {
-                    
-                    // Calculate bounds to avoid unnecessary calculations
-                    const startX = Math.max(0, Math.floor(relativeX - effectiveRadius * 1.5));
-                    const endX = Math.min(this.cityWidth, Math.ceil(relativeX + effectiveRadius * 1.5));
-                    const startY = Math.max(0, Math.floor(relativeY - effectiveRadius * 1.5));
-                    const endY = Math.min(this.cityHeight, Math.ceil(relativeY + effectiveRadius * 1.5));
-                    
-                    // Apply color-draining effect with optimization
-                    // Process fewer pixels for better performance
-                    for (let y = startY; y < endY; y += DRAIN_EFFECT_QUALITY) {
-                        for (let x = startX; x < endX; x += DRAIN_EFFECT_QUALITY) {
-                            const mapIndex = Math.floor(y) * Math.ceil(this.cityWidth) + Math.floor(x);
-                            
-                            // Skip if already processed by drain map
-                            if (processedMap[mapIndex] === 1) continue;
-                            
-                            const index = (y * this.cityWidth + x) * 4;
-                            
-                            // Calculate distance from player
-                            const dx = x - relativeX;
-                            const dy = y - relativeY;
-                            const distance = Math.sqrt(dx * dx + dy * dy);
-                            
-                            // Apply effect based on distance
-                            if (distance < effectiveRadius) {
-                                // Inside the drain radius - fully grayscale
-                                data[index] = grayData[index];
-                                data[index + 1] = grayData[index + 1];
-                                data[index + 2] = grayData[index + 2];
-                                
-                                // Apply the same effect to nearby pixels (optimization)
-                                if (DRAIN_EFFECT_QUALITY > 1) {
-                                    for (let dy = 0; dy < DRAIN_EFFECT_QUALITY && y + dy < endY; dy++) {
-                                        for (let dx = 0; dx < DRAIN_EFFECT_QUALITY && x + dx < endX; dx++) {
-                                            if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
-                                            
-                                            const nearbyIndex = ((y + dy) * this.cityWidth + (x + dx)) * 4;
-                                            const nearbyMapIndex = Math.floor(y + dy) * Math.ceil(this.cityWidth) + Math.floor(x + dx);
-                                            
-                                            // Skip if already processed
-                                            if (processedMap[nearbyMapIndex] === 1) continue;
-                                            
-                                            data[nearbyIndex] = grayData[nearbyIndex];
-                                            data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
-                                            data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
-                                            
-                                            // Mark as processed
-                                            processedMap[nearbyMapIndex] = 1;
-                                        }
-                                    }
-                                }
-                                
-                                // Also update the drain map for persistence
-                                this.drainMap[mapIndex] = 1;
-                                processedMap[mapIndex] = 1;
-                            } else if (distance < effectiveRadius * 1.5) {
-                                // Transition zone - blend between grayscale and color
-                                const blend = (distance - effectiveRadius) / (effectiveRadius * 0.5);
-                                data[index] = grayData[index] * (1 - blend) + colorData[index] * blend;
-                                data[index + 1] = grayData[index + 1] * (1 - blend) + colorData[index + 1] * blend;
-                                data[index + 2] = grayData[index + 2] * (1 - blend) + colorData[index + 2] * blend;
-                                
-                                // Apply the same effect to nearby pixels (optimization)
-                                if (DRAIN_EFFECT_QUALITY > 1) {
-                                    for (let dy = 0; dy < DRAIN_EFFECT_QUALITY && y + dy < endY; dy++) {
-                                        for (let dx = 0; dx < DRAIN_EFFECT_QUALITY && x + dx < endX; dx++) {
-                                            if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
-                                            
-                                            const nearbyIndex = ((y + dy) * this.cityWidth + (x + dx)) * 4;
-                                            const nearbyMapIndex = Math.floor(y + dy) * Math.ceil(this.cityWidth) + Math.floor(x + dx);
-                                            
-                                            // Skip if already processed
-                                            if (processedMap[nearbyMapIndex] === 1) continue;
-                                            
-                                            data[nearbyIndex] = grayData[nearbyIndex] * (1 - blend) + colorData[nearbyIndex] * blend;
-                                            data[nearbyIndex + 1] = grayData[nearbyIndex + 1] * (1 - blend) + colorData[nearbyIndex + 1] * blend;
-                                            data[nearbyIndex + 2] = grayData[nearbyIndex + 2] * (1 - blend) + colorData[nearbyIndex + 2] * blend;
-                                            
-                                            // Mark as processed
-                                            processedMap[nearbyMapIndex] = 1;
-                                        }
-                                    }
-                                }
-                            }
-                            // Outside effect radius pixels remain unchanged (optimization)
-                        }
-                    }
-                }
-            }
-            
-            // Apply a final pass to ensure all windows are properly drained
-            // This specifically targets yellow windows that might be missed
-            // Only do this check periodically to improve performance
-            const currentTime = Date.now();
-            if (!window.lastWindowCheckTime || currentTime - window.lastWindowCheckTime > 500) {
-                window.lastWindowCheckTime = currentTime;
+            // Apply current drain effect around player only if in view
+            if ((this.gameState === 'playing' || this.gameState === 'level2') && 
+                relativeX >= -COLOR_DRAIN_RADIUS && 
+                relativeX <= this.cityWidth + COLOR_DRAIN_RADIUS && 
+                relativeY >= -COLOR_DRAIN_RADIUS && 
+                relativeY <= this.cityHeight + COLOR_DRAIN_RADIUS) {
                 
-                for (let y = 0; y < this.cityHeight; y += DRAIN_EFFECT_QUALITY * 2) {
-                    for (let x = 0; x < this.cityWidth; x += DRAIN_EFFECT_QUALITY * 2) {
+                // Calculate bounds to avoid unnecessary calculations
+                const startX = Math.max(0, Math.floor(relativeX - effectiveRadius));
+                const endX = Math.min(this.cityWidth, Math.ceil(relativeX + effectiveRadius));
+                const startY = Math.max(0, Math.floor(relativeY - effectiveRadius));
+                const endY = Math.min(this.cityHeight, Math.ceil(relativeY + effectiveRadius));
+                
+                // Apply color-draining effect with optimization
+                // Process fewer pixels for better performance
+                for (let y = startY; y < endY; y += DRAIN_EFFECT_QUALITY) {
+                    for (let x = startX; x < endX; x += DRAIN_EFFECT_QUALITY) {
+                        const mapIndex = Math.floor(y) * cityWidthCeil + Math.floor(x);
+                        
+                        // Skip if already drained
+                        if (this.drainMap[mapIndex] === 1) continue;
+                        
                         const index = (y * this.cityWidth + x) * 4;
-                        const mapIndex = Math.floor(y) * Math.ceil(this.cityWidth) + Math.floor(x);
                         
-                        // Skip if already processed
-                        if (processedMap[mapIndex] === 1) continue;
+                        // Calculate distance from player
+                        const dx = x - relativeX;
+                        const dy = y - relativeY;
+                        const distanceSquared = dx * dx + dy * dy; // Avoid square root for performance
+                        const radiusSquared = effectiveRadius * effectiveRadius;
                         
-                        // Check if this is a yellow window (high red and green, low blue)
-                        const isYellowWindow = data[index] > 200 && data[index + 1] > 200 && data[index + 2] < 100;
-                        
-                        // If it's a yellow window and it's near a drained pixel, drain it too
-                        if (isYellowWindow) {
-                            let nearDrainedPixel = false;
+                        // Apply effect based on distance
+                        if (distanceSquared < radiusSquared) {
+                            // Inside the drain radius - fully grayscale
+                            data[index] = grayData[index];
+                            data[index + 1] = grayData[index + 1];
+                            data[index + 2] = grayData[index + 2];
                             
-                            // Check surrounding pixels
-                            const checkRadius = DRAIN_EFFECT_QUALITY * 2;
-                            for (let dy = -checkRadius; dy <= checkRadius && !nearDrainedPixel; dy += 2) {
-                                for (let dx = -checkRadius; dx <= checkRadius && !nearDrainedPixel; dx += 2) {
-                                    if (dx === 0 && dy === 0) continue;
-                                    
-                                    const ny = y + dy;
-                                    const nx = x + dx;
-                                    
-                                    if (ny >= 0 && ny < this.cityHeight && nx >= 0 && nx < this.cityWidth) {
-                                        const nearbyMapIndex = Math.floor(ny) * Math.ceil(this.cityWidth) + Math.floor(nx);
-                                        if (processedMap[nearbyMapIndex] === 1) {
-                                            nearDrainedPixel = true;
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // If near a drained pixel, drain this window too
-                            if (nearDrainedPixel) {
-                                data[index] = grayData[index];
-                                data[index + 1] = grayData[index + 1];
-                                data[index + 2] = grayData[index + 2];
-                                
-                                // Apply to surrounding pixels that might be part of the same window
-                                for (let dy = -2; dy <= 2; dy++) {
-                                    for (let dx = -2; dx <= 2; dx++) {
-                                        const ny = y + dy;
-                                        const nx = x + dx;
-                                        
-                                        if (ny >= 0 && ny < this.cityHeight && nx >= 0 && nx < this.cityWidth) {
-                                            const nearbyIndex = (ny * this.cityWidth + nx) * 4;
-                                            const nearbyIsYellow = data[nearbyIndex] > 200 && data[nearbyIndex + 1] > 200 && data[nearbyIndex + 2] < 100;
-                                            
-                                            if (nearbyIsYellow) {
-                                                data[nearbyIndex] = grayData[nearbyIndex];
-                                                data[nearbyIndex + 1] = grayData[nearbyIndex + 1];
-                                                data[nearbyIndex + 2] = grayData[nearbyIndex + 2];
-                                                
-                                                // Update drain map
-                                                const nearbyMapIndex = Math.floor(ny) * Math.ceil(this.cityWidth) + Math.floor(nx);
-                                                this.drainMap[nearbyMapIndex] = 1;
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                // Update drain map
-                                this.drainMap[mapIndex] = 1;
-                            }
+                            // Also update the drain map for persistence
+                            this.drainMap[mapIndex] = 1;
                         }
                     }
                 }
@@ -786,17 +658,22 @@ class Game {
         // Draw the resulting image to the main canvas
         this.ctx.drawImage(offscreenCanvas, cityX, cityY);
         
-        // Update the drained pixel count
-        this.drainedPixels = 0;
-        for (let i = 0; i < this.drainMap.length; i++) {
-            if (this.drainMap[i] === 1) {
-                this.drainedPixels++;
+        // Update the drained pixel count - do this less frequently
+        if (this.skipFrameCount === 0) {
+            // Use sampling to estimate drain percentage for better performance
+            const sampleSize = 1000;
+            let drainedCount = 0;
+            
+            for (let i = 0; i < sampleSize; i++) {
+                const randomIndex = Math.floor(Math.random() * this.drainMap.length);
+                if (this.drainMap[randomIndex] === 1) {
+                    drainedCount++;
+                }
             }
+            
+            this.colorPercentage = drainedCount / sampleSize;
+            this.score = Math.floor(this.colorPercentage * 1000);
         }
-        
-        // Update progress and score
-        this.colorPercentage = this.drainedPixels / this.totalPixels;
-        this.score = Math.floor(this.colorPercentage * 1000); // Score based on drain percentage
     }
 
     update() {
@@ -852,15 +729,32 @@ class Game {
     }
 
     gameLoop(timestamp) {
-        // Calculate FPS
+        // Calculate delta time and FPS
         if (this.lastFrameTime) {
             const deltaTime = timestamp - this.lastFrameTime;
+            
+            // Frame rate limiting
+            if (MAX_FPS > 0) {
+                const frameTime = 1000 / MAX_FPS;
+                if (deltaTime < frameTime) {
+                    requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+                    return;
+                }
+            }
+            
             this.fps = 1000 / deltaTime;
+            
+            // Update frame counter for processing heavy effects
+            this.skipFrameCount = (this.skipFrameCount + 1) % PROCESS_EVERY_N_FRAMES;
         }
+        
         this.lastFrameTime = timestamp;
         
+        // Update and draw
         this.update();
         this.draw();
+        
+        // Request next frame
         requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
     }
 
