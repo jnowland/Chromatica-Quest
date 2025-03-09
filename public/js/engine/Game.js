@@ -30,7 +30,7 @@ class Game {
         this.gameState = 'levelSelect';
         this.selectedLevel = 1;
         this.config = {
-            drainTarget: 60,
+            drainTarget: 100,
             laserSpeed: 5,
             dogEnabled: true
         };
@@ -456,8 +456,9 @@ class Game {
             this.applyDrainEffect(playerCenterX, playerCenterY, COLOR_DRAIN_RADIUS);
         }
         
-        // Check for victory
-        if (this.colorPercentage * 100 >= this.config.drainTarget) {
+        // Check for victory - must be exactly 100% now
+        const drainPercentage = Math.floor(this.colorPercentage * 100);
+        if (drainPercentage >= this.config.drainTarget) {
             // Victory condition met
             if (this.gameState === 'playing') {
                 this.gameState = 'levelComplete';

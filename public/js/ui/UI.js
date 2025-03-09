@@ -90,7 +90,7 @@ class UI {
         ctx.font = '16px Arial';
         ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
         ctx.fillText('Use arrow keys to move, space to jump', this.game.width / 2, this.game.height * 0.7);
-        ctx.fillText('Drain the city of its color to restore the world', this.game.width / 2, this.game.height * 0.75);
+        ctx.fillText('Drain 100% of the city\'s color to complete the level', this.game.width / 2, this.game.height * 0.75);
     }
     
     drawVictoryScreen() {
@@ -114,7 +114,7 @@ class UI {
         // Completion message
         ctx.font = '24px Arial';
         ctx.fillStyle = '#8FBC8F'; // Light green
-        ctx.fillText(`You've drained ${Math.floor(this.game.colorPercentage * 100)}% of the city!`, 
+        ctx.fillText(`Congratulations! You've drained 100% of the city!`, 
                     this.game.width / 2, this.game.height * 0.5);
         
         // Button dimensions
