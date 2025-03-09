@@ -75,6 +75,14 @@ class UI {
         const buttonX = (this.game.width - buttonWidth) / 2;
         const buttonY = this.game.height * 0.5;
         
+        // Store button bounds for click detection
+        this.startGameButtonBounds = {
+            x: buttonX,
+            y: buttonY,
+            width: buttonWidth,
+            height: buttonHeight
+        };
+        
         ctx.fillStyle = 'rgba(50, 50, 200, 0.8)';
         ctx.fillRect(buttonX, buttonY, buttonWidth, buttonHeight);
         
@@ -91,6 +99,7 @@ class UI {
         ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
         ctx.fillText('Use arrow keys to move, space to jump', this.game.width / 2, this.game.height * 0.7);
         ctx.fillText('Drain 100% of the city\'s color to complete the level', this.game.width / 2, this.game.height * 0.75);
+        ctx.fillText('Press ENTER or click Start Game to begin', this.game.width / 2, this.game.height * 0.8);
     }
     
     drawVictoryScreen() {
@@ -194,7 +203,7 @@ class UI {
         const startX = (this.game.width - totalWidth) / 2;
         const buttonY = this.game.height * 0.65;
         
-        // Try Again button
+        // Try Again button (now Start Level 1)
         ctx.fillStyle = 'rgba(50, 150, 50, 0.8)'; // Green
         ctx.fillRect(startX, buttonY, buttonWidth, buttonHeight);
         ctx.strokeStyle = 'white';
@@ -204,7 +213,7 @@ class UI {
         ctx.font = 'bold 24px Arial';
         ctx.fillStyle = 'white';
         ctx.textAlign = 'center';
-        ctx.fillText('Try Again', startX + buttonWidth/2, buttonY + 40);
+        ctx.fillText('Start Level 1', startX + buttonWidth/2, buttonY + 40);
         
         // Menu button
         ctx.fillStyle = 'rgba(50, 50, 200, 0.8)'; // Blue
@@ -234,15 +243,31 @@ class UI {
     handleClick(clickX, clickY) {
         // Handle level select screen clicks
         if (this.game.gameState === 'levelSelect') {
-            const buttonWidth = 200;
-            const buttonHeight = 60;
-            const buttonX = (this.game.width - buttonWidth) / 2;
-            const buttonY = this.game.height * 0.5;
-            
-            // Check if start button was clicked
-            if (clickX >= buttonX && clickX <= buttonX + buttonWidth &&
-                clickY >= buttonY && clickY <= buttonY + buttonHeight) {
+            // Check if start button was clicked using stored bounds
+            if (this.startGameButtonBounds &&
+                clickX >= this.startGameButtonBounds.x && 
+                clickX <= this.startGameButtonBounds.x + this.startGameButtonBounds.width &&
+                clickY >= this.startGameButtonBounds.y && 
+                clickY <= this.startGameButtonBounds.y + this.startGameButtonBounds.height) {
+                
+                console.log("Start Game button clicked");
                 this.game.gameState = 'playing';
+                
+                // Reset game state when starting
+                this.game.initDrainMap();
+                this.game.createPlatforms();
+                this.game.createLasers();
+                
+                // Reset player position
+                this.game.player.x = 50;
+                this.game.player.y = 50;
+                this.game.player.speedX = 0;
+                this.game.player.speedY = 0;
+                
+                // Reset lives and score
+                this.game.lives = this.game.maxLives;
+                this.game.score = 0;
+                this.game.colorPercentage = 0;
             }
         }
         // Handle victory screen clicks
@@ -283,8 +308,8 @@ class UI {
                 clickX <= this.tryAgainButtonBounds.x + this.tryAgainButtonBounds.width &&
                 clickY >= this.tryAgainButtonBounds.y && 
                 clickY <= this.tryAgainButtonBounds.y + this.tryAgainButtonBounds.height) {
-                // Restart level 2
-                this.game.gameState = 'level2';
+                // Start level 1 instead of restarting level 2
+                this.game.gameState = 'playing';
                 // Reset game state
                 this.game.initDrainMap();
                 this.game.createPlatforms();
@@ -296,6 +321,9 @@ class UI {
                 this.game.player.speedY = 0;
                 // Reset lives
                 this.game.lives = this.game.maxLives;
+                // Reset score and drain percentage
+                this.game.score = 0;
+                this.game.colorPercentage = 0;
             }
             // Check if Menu button was clicked
             else if (this.gameOverMenuButtonBounds && 

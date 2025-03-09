@@ -55,17 +55,18 @@ class Player {
         }
     }
 
-    update() {
-        const now = Date.now();
-        const deltaTime = now - this.lastUpdateTime;
+    update(deltaTime) {
+        // Apply gravity with deltaTime for smoother movement
+        const gravityForce = window.GRAVITY * (deltaTime / 16.67); // Normalize to 60fps
+        this.speedY += gravityForce;
         
-        // Apply gravity
-        this.speedY += window.GRAVITY; // Use window.GRAVITY
-        this.x += this.speedX;
-        this.y += this.speedY;
+        // Apply movement with deltaTime
+        this.x += this.speedX * (deltaTime / 16.67);
+        this.y += this.speedY * (deltaTime / 16.67);
 
         // Check boundaries and collisions
         const onGround = this.game.checkCollisions(this);
+        this.onGround = onGround; // Store for reference
         
         // Handle coyote time (time after walking off a platform where you can still jump)
         if (onGround) {
@@ -96,64 +97,64 @@ class Player {
         for (let i = this.jumpParticles.length - 1; i >= 0; i--) {
             const particle = this.jumpParticles[i];
             particle.life -= deltaTime;
-            particle.x += particle.vx;
-            particle.y += particle.vy;
-            particle.vy += 0.1; // Particle gravity
+            particle.x += particle.vx * (deltaTime / 16.67);
+            particle.y += particle.vy * (deltaTime / 16.67);
             
+            // Remove dead particles
             if (particle.life <= 0) {
                 this.jumpParticles.splice(i, 1);
             }
         }
-
-        // Update walk animation
-        if (now - this.lastUpdateTime > 100) {
-            if (this.speedX !== 0) {
-                this.walkCycle += 0.2 * this.walkDirection;
-                if (this.walkCycle > 1 || this.walkCycle < -1) {
-                    this.walkDirection *= -1;
-                }
-            } else {
-                this.walkCycle = 0;
-            }
-            this.lastUpdateTime = now;
+        
+        // Update walk cycle for animation
+        if (this.speedX !== 0) {
+            this.walkCycle += deltaTime / 100;
+            this.facingRight = this.speedX > 0;
+        } else {
+            this.walkCycle = 0;
         }
-
-        // Update facing direction
-        if (this.speedX > 0) this.facingRight = true;
-        else if (this.speedX < 0) this.facingRight = false;
-
-        // Check draining state
+        
+        // Check if player is draining color
         this.checkDraining();
     }
     
     jump() {
-        // Create jump particles
-        this.createJumpParticles();
-        
-        // Apply jump force
-        this.speedY = JUMP_FORCE;
-        this.isJumping = true;
-        this.jumpCount++;
-        
-        // Reset coyote time
-        this.coyoteTime = 0;
+        // Only allow jumping if we haven't used all our jumps
+        if (this.jumpCount < this.maxJumps) {
+            this.speedY = JUMP_FORCE;
+            this.isJumping = true;
+            this.jumpCount++;
+            this.jumpReleased = false;
+            
+            // Create jump particles if enabled
+            if (window.ENABLE_PARTICLE_EFFECTS) {
+                this.createJumpParticles();
+            }
+            
+            // Play jump sound
+            try {
+                if (this.drainSound) {
+                    this.drainSound.play();
+                }
+            } catch (e) {
+                console.warn("Could not play jump sound", e);
+            }
+        }
     }
     
     createJumpParticles() {
-        // Create particles at the player's feet
-        const particleCount = 8;
+        // Limit the number of particles for performance
+        const particleCount = 10; // Reduced from original
+        
         for (let i = 0; i < particleCount; i++) {
-            const angle = (Math.PI * (i / particleCount)) + (Math.PI / particleCount);
-            const speed = 1 + Math.random() * 2;
-            
             this.jumpParticles.push({
                 x: this.x + this.width / 2,
                 y: this.y + this.height,
-                vx: Math.cos(angle) * speed,
-                vy: Math.sin(angle) * speed - 2, // Initial upward velocity
-                size: 2 + Math.random() * 3,
-                life: 300 + Math.random() * 200,
-                color: `rgba(255, 255, 255, ${0.7 + Math.random() * 0.3})`
+                vx: (Math.random() - 0.5) * 3,
+                vy: Math.random() * 2 + 1,
+                life: Math.random() * 300 + 200,
+                size: Math.random() * 4 + 2,
+                color: `rgba(255, 255, 255, ${Math.random() * 0.5 + 0.5})`
             });
         }
     }
@@ -175,73 +176,124 @@ class Player {
     }
 
     draw(ctx) {
-        // Draw jump particles
-        this.jumpParticles.forEach(particle => {
-            ctx.fillStyle = particle.color;
-            ctx.beginPath();
-            ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
-            ctx.fill();
-        });
+        // Skip drawing if off-screen for performance
+        if (this.x + this.width < 0 || this.x > ctx.canvas.width || 
+            this.y + this.height < 0 || this.y > ctx.canvas.height) {
+            return;
+        }
+        
+        // Draw jump particles if enabled
+        if (window.ENABLE_PARTICLE_EFFECTS && this.jumpParticles.length > 0) {
+            for (const particle of this.jumpParticles) {
+                ctx.fillStyle = particle.color;
+                ctx.beginPath();
+                ctx.arc(particle.x, particle.y, particle.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
         
         // Draw player body
         ctx.fillStyle = this.color;
-        ctx.fillRect(this.x, this.y, this.width, this.height);
         
-        // Draw player head
-        ctx.fillRect(this.x + 5, this.y - 15, this.width - 10, 15);
+        // Head (circle)
+        const headRadius = 15;
+        const headX = this.x + this.width / 2;
+        const headY = this.y + headRadius;
         
-        // Draw player eyes
-        ctx.fillStyle = 'black';
-        const eyeX = this.facingRight ? this.x + this.width - 15 : this.x + 5;
-        ctx.fillRect(eyeX, this.y - 10, 5, 5);
+        ctx.beginPath();
+        ctx.arc(headX, headY, headRadius, 0, Math.PI * 2);
+        ctx.fill();
         
-        // Draw player legs with animation
-        ctx.fillStyle = this.color;
+        // Body (rectangle)
+        const bodyLength = this.height - headRadius * 2;
+        ctx.fillRect(
+            this.x + this.width / 4,
+            this.y + headRadius * 2,
+            this.width / 2,
+            bodyLength
+        );
+        
+        // Arms
+        const armWidth = this.width / 4;
+        const armHeight = bodyLength / 3;
+        const armY = this.y + headRadius * 2 + bodyLength / 6;
+        
+        // Left arm
+        ctx.fillRect(
+            this.x,
+            armY,
+            armWidth,
+            armHeight
+        );
+        
+        // Right arm
+        ctx.fillRect(
+            this.x + this.width - armWidth,
+            armY,
+            armWidth,
+            armHeight
+        );
+        
+        // Legs
+        const legWidth = this.width / 4;
+        const legHeight = bodyLength / 2.5;
+        const legY = this.y + headRadius * 2 + bodyLength;
+        
+        // Calculate leg swing based on walk cycle
+        let leftLegOffset = 0;
+        let rightLegOffset = 0;
+        
+        if (this.speedX !== 0) {
+            const swingAmount = Math.sin(this.walkCycle) * 5;
+            leftLegOffset = swingAmount;
+            rightLegOffset = -swingAmount;
+        }
         
         // Left leg
-        ctx.save();
-        ctx.translate(this.x + 5, this.y + this.height);
-        ctx.rotate(this.walkCycle * 0.5);
-        ctx.fillRect(-2, 0, 10, 15);
-        ctx.restore();
+        ctx.fillRect(
+            this.x + this.width / 4 - legWidth / 2 + leftLegOffset,
+            legY,
+            legWidth,
+            legHeight
+        );
         
         // Right leg
-        ctx.save();
-        ctx.translate(this.x + this.width - 5, this.y + this.height);
-        ctx.rotate(-this.walkCycle * 0.5);
-        ctx.fillRect(-8, 0, 10, 15);
-        ctx.restore();
+        ctx.fillRect(
+            this.x + this.width * 3/4 - legWidth / 2 + rightLegOffset,
+            legY,
+            legWidth,
+            legHeight
+        );
         
-        // Draw player arms
-        ctx.save();
-        ctx.translate(this.x, this.y + 10);
-        ctx.rotate(this.walkCycle * 0.3);
-        ctx.fillRect(0, 0, 10, 5);
-        ctx.restore();
+        // Eyes
+        ctx.fillStyle = 'black';
+        const eyeRadius = 3;
+        const eyeY = headY - 2;
+        const eyeXOffset = 5;
         
-        ctx.save();
-        ctx.translate(this.x + this.width, this.y + 10);
-        ctx.rotate(-this.walkCycle * 0.3);
-        ctx.fillRect(-10, 0, 10, 5);
-        ctx.restore();
+        // Determine eye direction based on facing
+        const eyeXDirection = this.facingRight ? 1 : -1;
         
-        // Draw draining effect when near city center
-        const distanceToCity = Math.hypot(this.x - this.game.cityCenterX, this.y - this.game.cityCenterY);
-        if (distanceToCity < window.COLOR_DRAIN_RADIUS) {
-            // Pulsating drain effect
-            const pulseSize = 5 + Math.sin(Date.now() / 200) * 3;
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.beginPath();
-            ctx.arc(this.x + this.width/2, this.y + this.height/2, pulseSize, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        // Left eye
+        ctx.beginPath();
+        ctx.arc(
+            headX - eyeXOffset * eyeXDirection, 
+            eyeY, 
+            eyeRadius, 
+            0, 
+            Math.PI * 2
+        );
+        ctx.fill();
         
-        // Draw double jump indicator
-        if (this.jumpCount === 1 && this.isJumping) {
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.beginPath();
-            ctx.arc(this.x + this.width/2, this.y + this.height/2, 15, 0, Math.PI * 2);
-            ctx.fill();
-        }
+        // Right eye
+        ctx.beginPath();
+        ctx.arc(
+            headX + eyeXOffset * eyeXDirection, 
+            eyeY, 
+            eyeRadius, 
+            0, 
+            Math.PI * 2
+        );
+        ctx.fill();
     }
 } 

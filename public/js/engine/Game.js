@@ -59,22 +59,58 @@ class Game {
         this.fps = 60;
         this.lastFrameTime = 0;
         this.skipFrameCount = 0;
+
+        // Morse code easter egg
+        this.morseCode = {
+            'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.', 
+            'G': '--.', 'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..', 
+            'M': '--', 'N': '-.', 'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.', 
+            'S': '...', 'T': '-', 'U': '..-', 'V': '...-', 'W': '.--', 'X': '-..-', 
+            'Y': '-.--', 'Z': '--..', ' ': '/'
+        };
+        this.morseMessage = "YOUR ATTEMPT IS NOT ENOUGH";
+        this.morseBlinkTimer = 0;
+        this.morseBlinkState = true;
+        this.morseBlinkSpeed = 500; // milliseconds
     }
 
     init() {
-        // Generate city background
-        this.generateCityBackground();
+        // Initialize game state
+        this.gameState = 'levelSelect';
+        this.showDebug = false;
+        this.score = 0;
+        this.fps = 0;
+        this.deltaTime = 0;
+        this.lastFrameTime = 0;
+        this.skipFrameCount = 0;
         
         // Initialize drain map
         this.initDrainMap();
         
-        // Create game objects
-        this.createPlatforms();
-        this.createDog();
+        // Generate city background
+        this.generateCityBackground();
         
+        // Create platforms
+        this.createPlatforms();
+        
+        // Create dog
+        if (this.config.dogEnabled) {
+            this.createDog();
+        }
+        
+        // Create lasers (will be positioned based on game state)
+        this.createLasers();
+        
+        // Set up input handlers
         this.setupInput();
-        this.setupPlayButton();
-        this.gameLoop();
+        
+        // Add click debugging
+        this.lastClickX = 0;
+        this.lastClickY = 0;
+        this.clickDebugTimer = 0;
+        
+        // Start game loop
+        requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
     }
 
     setupPlayButton() {
@@ -106,9 +142,25 @@ class Game {
     }
 
     initDrainMap() {
-        // Create a map to track which pixels have been drained
-        this.drainMap = new Uint8Array(Math.ceil(this.cityWidth) * Math.ceil(this.cityHeight));
+        if (window.LOW_PERFORMANCE_MODE) {
+            // In low performance mode, we use a simpler approach
+            this.drainedPixels = 0;
+            this.totalPixels = this.cityWidth * this.cityHeight;
+            this.drainTrailPositions = [];
+            return;
+        }
+        
+        // Create a new drain map with reduced resolution for better performance
+        const stepSize = DRAIN_EFFECT_QUALITY;
+        const mapWidth = Math.ceil(this.cityWidth / stepSize);
+        const mapHeight = Math.ceil(this.cityHeight / stepSize);
+        
+        this.drainMap = new Uint8Array(mapWidth * mapHeight);
         this.drainedPixels = 0;
+        this.totalPixels = this.cityWidth * this.cityHeight;
+        
+        // Reset color percentage
+        this.colorPercentage = 0;
     }
 
     generateCityBackground() {
@@ -185,97 +237,64 @@ class Game {
             const buildingHeight = Math.random() * (maxBuildingHeight - minBuildingHeight) + minBuildingHeight;
             
             // Use darker colors more frequently
-            let colorIndex;
-            if (Math.random() > 0.4) {
-                // 60% chance of darker colors (indices 3-7)
-                colorIndex = Math.floor(Math.random() * 5) + 3;
-            } else {
-                // 40% chance of lighter colors (indices 0-2)
-                colorIndex = Math.floor(Math.random() * 3);
-            }
-            
-            // Draw building with darker grey/white color
+            const colorIndex = Math.floor(Math.random() * buildingColors.length);
             cityCtx.fillStyle = buildingColors[colorIndex];
+            
+            // Draw the building
             cityCtx.fillRect(x, this.cityHeight - buildingHeight, buildingWidth, buildingHeight);
             
-            // Add yellow windows to buildings
-            cityCtx.fillStyle = 'rgba(255, 255, 0, 0.8)';
-            const windowSize = Math.max(4, this.cityHeight / 100);
-            const windowSpacing = windowSize * 2;
-            
-            for (let wy = this.cityHeight - buildingHeight + windowSpacing; wy < this.cityHeight - windowSpacing; wy += windowSpacing * 1.5) {
-                for (let wx = x + windowSpacing/2; wx < x + buildingWidth - windowSpacing/2; wx += windowSpacing) {
-                    if (Math.random() > 0.3) { // Some windows are lit
-                        cityCtx.fillRect(wx, wy, windowSize, windowSize * 1.5);
-                    }
-                }
-            }
-            
-            // Add building details
-            cityCtx.strokeStyle = 'rgba(50, 50, 50, 0.7)';
-            cityCtx.lineWidth = 1;
-            cityCtx.strokeRect(x, this.cityHeight - buildingHeight, buildingWidth, buildingHeight);
-            
-            // Add roof details to some buildings
-            if (Math.random() > 0.7) {
-                // Use darker colors for roof structures
-                const roofColorIndex = Math.floor(Math.random() * 3) + 5;
-                cityCtx.fillStyle = buildingColors[roofColorIndex];
-                cityCtx.fillRect(x + buildingWidth/4, this.cityHeight - buildingHeight - windowSize*2, buildingWidth/2, windowSize*2);
-            }
-        }
-        
-        // Add some foreground details
-        const foregroundBuildingSpacing = buildingSpacing * 1.5;
-        const foregroundMaxHeight = this.cityHeight * 0.3;
-        
-        for (let x = 0; x < this.cityWidth; x += foregroundBuildingSpacing) {
-            const buildingWidth = Math.random() * (this.cityWidth/40) + (this.cityWidth/80);
-            const buildingHeight = Math.random() * foregroundMaxHeight + (this.cityHeight * 0.05);
-            
-            // Use darker grey for foreground buildings
-            const darkGreyColor = `rgba(${Math.floor(Math.random() * 50) + 30}, ${Math.floor(Math.random() * 50) + 30}, ${Math.floor(Math.random() * 50) + 30}, 0.9)`;
-            cityCtx.fillStyle = darkGreyColor;
-            cityCtx.fillRect(x, this.cityHeight - buildingHeight, buildingWidth, buildingHeight);
-            
-            // Add yellow windows to foreground buildings too
-            cityCtx.fillStyle = 'rgba(255, 255, 0, 0.8)';
-            const windowSize = Math.max(3, this.cityHeight / 120);
+            // Add windows to buildings
+            cityCtx.fillStyle = 'rgba(255, 255, 0, 0.5)';
+            const windowSize = Math.max(2, buildingWidth / 4);
             const windowSpacing = windowSize * 1.5;
             
-            for (let wy = this.cityHeight - buildingHeight + windowSpacing; wy < this.cityHeight - windowSpacing; wy += windowSpacing * 1.5) {
-                for (let wx = x + windowSpacing/2; wx < x + buildingWidth - windowSpacing/2; wx += windowSpacing) {
-                    if (Math.random() > 0.4) { // More windows are lit in foreground
+            for (let wx = x + windowSize; wx < x + buildingWidth - windowSize; wx += windowSpacing) {
+                for (let wy = this.cityHeight - buildingHeight + windowSize; wy < this.cityHeight - windowSize; wy += windowSpacing) {
+                    // Only draw some windows (random pattern)
+                    if (Math.random() > 0.3) {
                         cityCtx.fillRect(wx, wy, windowSize, windowSize);
                     }
                 }
             }
         }
         
-        // Ground - darker grey
-        cityCtx.fillStyle = '#222222';
-        cityCtx.fillRect(0, this.cityHeight - this.cityHeight * 0.05, this.cityWidth, this.cityHeight * 0.05);
-        
-        // Store the color version
+        // Store the color version of the city
         this.cityColorData = cityCtx.getImageData(0, 0, this.cityWidth, this.cityHeight);
         
-        // Create grayscale version
-        cityCtx.putImageData(this.cityColorData, 0, 0);
+        // Create a grayscale version
         const imageData = cityCtx.getImageData(0, 0, this.cityWidth, this.cityHeight);
         const data = imageData.data;
         
-        // Convert to grayscale
         for (let i = 0; i < data.length; i += 4) {
             const avg = (data[i] + data[i + 1] + data[i + 2]) / 3;
-            data[i] = avg;     // red
-            data[i + 1] = avg; // green
-            data[i + 2] = avg; // blue
+            data[i] = avg;     // R
+            data[i + 1] = avg; // G
+            data[i + 2] = avg; // B
+            // A remains unchanged
         }
         
+        // Store the grayscale version
         this.cityGrayscaleData = imageData;
         
-        // Calculate the actual number of pixels in the city
-        this.totalPixels = this.cityWidth * this.cityHeight;
+        // For low performance mode, create separate canvases for color and grayscale
+        if (window.LOW_PERFORMANCE_MODE) {
+            // Create color canvas
+            this.cityColorCanvas = document.createElement('canvas');
+            this.cityColorCanvas.width = this.cityWidth;
+            this.cityColorCanvas.height = this.cityHeight;
+            const colorCtx = this.cityColorCanvas.getContext('2d');
+            colorCtx.putImageData(this.cityColorData, 0, 0);
+            
+            // Create grayscale canvas
+            this.cityGrayscaleCanvas = document.createElement('canvas');
+            this.cityGrayscaleCanvas.width = this.cityWidth;
+            this.cityGrayscaleCanvas.height = this.cityHeight;
+            const grayCtx = this.cityGrayscaleCanvas.getContext('2d');
+            grayCtx.putImageData(this.cityGrayscaleData, 0, 0);
+            
+            // Initialize drain trail positions array
+            this.drainTrailPositions = [];
+        }
     }
 
     createPlatforms() {
@@ -416,8 +435,8 @@ class Game {
             } else if (this.gameState === 'gameOver') {
                 // Handle keyboard navigation on game over screen
                 if (e.key === '1' || e.key === 'Enter') {
-                    // Try again
-                    this.gameState = 'level2';
+                    // Start level 1 instead of restarting level 2
+                    this.gameState = 'playing';
                     // Reset game state
                     this.initDrainMap();
                     this.createPlatforms();
@@ -429,6 +448,9 @@ class Game {
                     this.player.speedY = 0;
                     // Reset lives
                     this.lives = this.maxLives;
+                    // Reset score and drain percentage
+                    this.score = 0;
+                    this.colorPercentage = 0;
                 } else if (e.key === '2' || e.key === 'Escape') {
                     // Go back to menu
                     this.gameState = 'levelSelect';
@@ -441,7 +463,24 @@ class Game {
             } else if (this.gameState === 'levelSelect') {
                 // Start game on Enter or Space
                 if (e.key === 'Enter' || e.key === ' ') {
+                    console.log("Starting game from keyboard input");
                     this.gameState = 'playing';
+                    
+                    // Reset game state when starting
+                    this.initDrainMap();
+                    this.createPlatforms();
+                    this.createLasers();
+                    
+                    // Reset player position
+                    this.player.x = 50;
+                    this.player.y = 50;
+                    this.player.speedX = 0;
+                    this.player.speedY = 0;
+                    
+                    // Reset lives and score
+                    this.lives = this.maxLives;
+                    this.score = 0;
+                    this.colorPercentage = 0;
                 }
             }
             
@@ -465,6 +504,19 @@ class Game {
             const rect = this.canvas.getBoundingClientRect();
             const clickX = e.clientX - rect.left;
             const clickY = e.clientY - rect.top;
+            
+            // Store click position for debugging
+            this.lastClickX = clickX;
+            this.lastClickY = clickY;
+            this.clickDebugTimer = 3000; // Show for 3 seconds
+            
+            console.log(`Click at ${clickX}, ${clickY} in game state: ${this.gameState}`);
+            
+            // Toggle debug mode on right side of screen
+            if (clickX > this.width - 50 && clickY < 50) {
+                this.showDebug = !this.showDebug;
+            }
+            
             this.ui.handleClick(clickX, clickY);
         });
     }
@@ -628,6 +680,12 @@ class Game {
     }
 
     drawCityWithColorDrainEffect() {
+        // In low performance mode, use a much simpler approach
+        if (window.LOW_PERFORMANCE_MODE) {
+            this.drawCityLowPerformance();
+            return;
+        }
+        
         // Calculate city position (centered at bottom)
         const cityX = 0; // Start from left edge
         const cityY = this.height - this.cityHeight;
@@ -680,28 +738,19 @@ class Game {
             
             // Use a more efficient approach for the drain map
             // Process in larger chunks for better performance
-            const stepSize = DRAIN_EFFECT_QUALITY / 2; // Reduced for better quality
+            const stepSize = DRAIN_EFFECT_QUALITY; // Use the full quality setting
             const cityWidthCeil = Math.ceil(this.cityWidth);
             
-            // Apply persistent drain effect from drain map
+            // Apply persistent drain effect from drain map - optimized with larger step size
             for (let y = 0; y < this.cityHeight; y += stepSize) {
                 for (let x = 0; x < this.cityWidth; x += stepSize) {
-                    const mapIndex = Math.floor(y) * cityWidthCeil + Math.floor(x);
+                    const mapIndex = Math.floor(y / stepSize) * Math.ceil(this.cityWidth / stepSize) + Math.floor(x / stepSize);
                     
                     // If this pixel has been drained before
                     if (this.drainMap[mapIndex] === 1) {
-                        const index = (y * this.cityWidth + x) * 4;
-                        
-                        // Apply grayscale effect
-                        data[index] = grayData[index];
-                        data[index + 1] = grayData[index + 1];
-                        data[index + 2] = grayData[index + 2];
-                        
-                        // Apply to surrounding pixels too (in a block)
-                        for (let dy = 0; dy < stepSize && y + dy < this.cityHeight; dy++) {
-                            for (let dx = 0; dx < stepSize && x + dx < this.cityWidth; dx++) {
-                                if (dx === 0 && dy === 0) continue; // Skip the pixel we already processed
-                                
+                        // Apply grayscale effect to the entire block at once
+                        for (let dy = 0; dy < stepSize && y + dy < this.cityHeight; dy += 2) {
+                            for (let dx = 0; dx < stepSize && x + dx < this.cityWidth; dx += 2) {
                                 const nearbyIndex = ((y + dy) * this.cityWidth + (x + dx)) * 4;
                                 
                                 data[nearbyIndex] = grayData[nearbyIndex];
@@ -726,15 +775,13 @@ class Game {
                 const startY = Math.max(0, Math.floor(relativeY - effectiveRadius));
                 const endY = Math.min(this.cityHeight, Math.ceil(relativeY + effectiveRadius));
                 
-                // Apply color-draining effect with optimization
-                for (let y = startY; y < endY; y += DRAIN_EFFECT_QUALITY / 2) {
-                    for (let x = startX; x < endX; x += DRAIN_EFFECT_QUALITY / 2) {
-                        const mapIndex = Math.floor(y) * cityWidthCeil + Math.floor(x);
+                // Apply color-draining effect with optimization - use larger step size
+                for (let y = startY; y < endY; y += stepSize) {
+                    for (let x = startX; x < endX; x += stepSize) {
+                        const mapIndex = Math.floor(y / stepSize) * Math.ceil(this.cityWidth / stepSize) + Math.floor(x / stepSize);
                         
                         // Skip if already drained
                         if (this.drainMap[mapIndex] === 1) continue;
-                        
-                        const index = (y * this.cityWidth + x) * 4;
                         
                         // Calculate distance from player
                         const dx = x - relativeX;
@@ -744,14 +791,27 @@ class Game {
                         
                         // Apply effect based on distance
                         if (distanceSquared < radiusSquared) {
-                            // Inside the drain radius - fully grayscale
-                            data[index] = grayData[index];
-                            data[index + 1] = grayData[index + 1];
-                            data[index + 2] = grayData[index + 2];
-                            
-                            // Also update the drain map for persistence
+                            // Mark this block as drained
                             this.drainMap[mapIndex] = 1;
-                            this.drainedPixels++; // Count this pixel
+                            this.drainedPixels += (stepSize * stepSize) / 4; // Approximate count
+                            
+                            // Apply to the entire block at once, but skip pixels for performance
+                            for (let dy = 0; dy < stepSize && y + dy < endY; dy += 2) {
+                                for (let dx = 0; dx < stepSize && x + dx < endX; dx += 2) {
+                                    const blockX = x + dx;
+                                    const blockY = y + dy;
+                                    
+                                    // Skip if out of bounds
+                                    if (blockX < startX || blockX >= endX || blockY < startY || blockY >= endY) continue;
+                                    
+                                    const index = (blockY * this.cityWidth + blockX) * 4;
+                                    
+                                    // Inside the drain radius - fully grayscale
+                                    data[index] = grayData[index];
+                                    data[index + 1] = grayData[index + 1];
+                                    data[index + 2] = grayData[index + 2];
+                                }
+                            }
                         }
                     }
                 }
@@ -760,37 +820,122 @@ class Game {
             // Store the processed image data
             offCtx.putImageData(imageData, 0, 0);
             window.lastProcessedImageData = imageData;
+        } else {
+            // Reuse the last processed image data if available
+            if (window.lastProcessedImageData) {
+                offCtx.putImageData(window.lastProcessedImageData, 0, 0);
+            }
         }
         
         // Draw the resulting image to the main canvas
         this.ctx.drawImage(offscreenCanvas, cityX, cityY);
     }
+    
+    // Low performance alternative that doesn't use pixel manipulation
+    drawCityLowPerformance() {
+        // Calculate city position
+        const cityX = 0;
+        const cityY = this.height - this.cityHeight;
+        
+        // Draw the grayscale version as the base
+        this.ctx.drawImage(this.cityGrayscaleCanvas, cityX, cityY);
+        
+        // Calculate the percentage of color drained for UI
+        this.colorPercentage = Math.min(100, (this.drainedPixels / this.totalPixels) * 100);
+        
+        // If we're not playing, just show the grayscale version
+        if (this.gameState !== 'playing' && this.gameState !== 'level2') {
+            return;
+        }
+        
+        // Create a circular clipping region for the colored part
+        this.ctx.save();
+        
+        // Create a path for the non-drained areas
+        this.ctx.beginPath();
+        
+        // Add circles for each drain position
+        for (let i = 0; i < this.drainTrailPositions.length; i++) {
+            const pos = this.drainTrailPositions[i];
+            this.ctx.rect(0, 0, this.width, this.height);
+            this.ctx.arc(pos.x, pos.y, COLOR_DRAIN_RADIUS, 0, Math.PI * 2, true);
+        }
+        
+        // Add circle for current player position
+        const centerX = this.player.x + this.player.width/2;
+        const centerY = this.player.y + this.player.height/2;
+        this.ctx.arc(centerX, centerY, COLOR_DRAIN_RADIUS, 0, Math.PI * 2, true);
+        
+        this.ctx.clip();
+        
+        // Draw the colored version in the clipped region
+        this.ctx.drawImage(this.cityColorCanvas, cityX, cityY);
+        
+        this.ctx.restore();
+        
+        // Update drain trail for next frame
+        if (Math.abs(this.player.x - this.lastPlayerX) > 50 || 
+            Math.abs(this.player.y - this.lastPlayerY) > 50) {
+            
+            // Add current position to drain trail
+            this.drainTrailPositions.push({
+                x: centerX,
+                y: centerY
+            });
+            
+            // Keep only the last 10 positions
+            if (this.drainTrailPositions.length > 10) {
+                this.drainTrailPositions.shift();
+            }
+            
+            // Update last position
+            this.lastPlayerX = this.player.x;
+            this.lastPlayerY = this.player.y;
+            
+            // Increment drained pixels
+            this.drainedPixels += Math.PI * COLOR_DRAIN_RADIUS * COLOR_DRAIN_RADIUS;
+        }
+    }
 
     update() {
-        // Calculate delta time for time-based updates
-        const now = Date.now();
-        const deltaTime = now - (this.lastUpdateTime || now);
-        this.lastUpdateTime = now;
+        // Calculate delta time
+        const now = performance.now();
+        this.deltaTime = now - this.lastFrameTime;
+        this.lastFrameTime = now;
         
-        if (this.gameState === 'playing' || this.gameState === 'level2') {
-            // Update invulnerability status
-            this.updateInvulnerability(deltaTime);
-            
-            this.player.update();
-            
-            if (this.dog) {
-                this.dog.update();
-            }
-            
-            this.lasers.forEach(laser => laser.update && laser.update());
-            
-            // Check for laser collisions in level 2
-            if (this.gameState === 'level2') {
-                this.checkLaserCollisions();
-            }
-            
-            // Update drain effect
-            this.updateDrainMap();
+        // Skip update if we're not in a playable state
+        if (this.gameState !== 'playing' && this.gameState !== 'level2') {
+            return;
+        }
+        
+        // Update player
+        this.player.update(this.deltaTime);
+        
+        // Update dog if it exists
+        if (this.dog) {
+            this.dog.update(this.deltaTime);
+        }
+        
+        // Update lasers
+        this.lasers.forEach(laser => {
+            laser.update && laser.update(this.deltaTime);
+        });
+        
+        // Check for collisions with platforms
+        this.checkCollisions(this.player);
+        
+        // Check for laser collisions
+        this.checkLaserCollisions();
+        
+        // Update invulnerability timer
+        this.updateInvulnerability(this.deltaTime);
+        
+        // Update drain map based on player position
+        this.updateDrainMap();
+        
+        // Check if level is complete (100% drained)
+        if (this.colorPercentage >= this.config.drainTarget) {
+            this.gameState = 'levelComplete';
         }
     }
 
@@ -834,6 +979,11 @@ class Game {
             if (this.dog) {
                 this.dog.draw(this.ctx);
             }
+            
+            // Draw morse code sign in Level 2
+            if (this.gameState === 'level2') {
+                this.drawMorseCodeSign();
+            }
 
             // Draw debug info
             if (this.showDebug) {
@@ -849,41 +999,132 @@ class Game {
     }
 
     drawLives() {
-        const lifeSize = 20;
-        const spacing = 5;
-        const startX = 10;
-        const startY = 50;
+        const heartSize = 30;
+        const spacing = 10;
+        const startX = 20;
+        const startY = 20;
         
-        this.ctx.fillStyle = 'red';
-        for (let i = 0; i < this.lives; i++) {
-            // Draw a heart shape for each life
-            const x = startX + i * (lifeSize + spacing);
-            const y = startY;
+        for (let i = 0; i < this.maxLives; i++) {
+            const x = startX + i * (heartSize + spacing);
             
-            this.ctx.beginPath();
-            this.ctx.moveTo(x + lifeSize/2, y + lifeSize/5);
-            this.ctx.bezierCurveTo(
-                x + lifeSize/2, y, 
-                x, y, 
-                x, y + lifeSize/3
-            );
-            this.ctx.bezierCurveTo(
-                x, y + lifeSize/1.5, 
-                x + lifeSize/2, y + lifeSize, 
-                x + lifeSize/2, y + lifeSize
-            );
-            this.ctx.bezierCurveTo(
-                x + lifeSize/2, y + lifeSize, 
-                x + lifeSize, y + lifeSize/1.5, 
-                x + lifeSize, y + lifeSize/3
-            );
-            this.ctx.bezierCurveTo(
-                x + lifeSize, y, 
-                x + lifeSize/2, y, 
-                x + lifeSize/2, y + lifeSize/5
-            );
-            this.ctx.fill();
+            if (i < this.lives) {
+                // Draw filled heart
+                this.ctx.fillStyle = '#ff3366';
+                this.ctx.beginPath();
+                this.ctx.moveTo(x + heartSize / 2, startY + heartSize / 5);
+                this.ctx.bezierCurveTo(
+                    x + heartSize / 2, startY, 
+                    x, startY, 
+                    x, startY + heartSize / 3
+                );
+                this.ctx.bezierCurveTo(
+                    x, startY + heartSize / 1.5, 
+                    x + heartSize / 2, startY + heartSize, 
+                    x + heartSize / 2, startY + heartSize
+                );
+                this.ctx.bezierCurveTo(
+                    x + heartSize / 2, startY + heartSize, 
+                    x + heartSize, startY + heartSize / 1.5, 
+                    x + heartSize, startY + heartSize / 3
+                );
+                this.ctx.bezierCurveTo(
+                    x + heartSize, startY, 
+                    x + heartSize / 2, startY, 
+                    x + heartSize / 2, startY + heartSize / 5
+                );
+                this.ctx.fill();
+            } else {
+                // Draw empty heart
+                this.ctx.strokeStyle = '#ff3366';
+                this.ctx.lineWidth = 2;
+                this.ctx.beginPath();
+                this.ctx.moveTo(x + heartSize / 2, startY + heartSize / 5);
+                this.ctx.bezierCurveTo(
+                    x + heartSize / 2, startY, 
+                    x, startY, 
+                    x, startY + heartSize / 3
+                );
+                this.ctx.bezierCurveTo(
+                    x, startY + heartSize / 1.5, 
+                    x + heartSize / 2, startY + heartSize, 
+                    x + heartSize / 2, startY + heartSize
+                );
+                this.ctx.bezierCurveTo(
+                    x + heartSize / 2, startY + heartSize, 
+                    x + heartSize, startY + heartSize / 1.5, 
+                    x + heartSize, startY + heartSize / 3
+                );
+                this.ctx.bezierCurveTo(
+                    x + heartSize, startY, 
+                    x + heartSize / 2, startY, 
+                    x + heartSize / 2, startY + heartSize / 5
+                );
+                this.ctx.stroke();
+            }
         }
+    }
+
+    // Convert text to morse code
+    textToMorse(text) {
+        return text.toUpperCase().split('').map(char => {
+            return this.morseCode[char] || char;
+        }).join(' ');
+    }
+    
+    // Draw morse code sign
+    drawMorseCodeSign() {
+        if (!window.ENABLE_MORSE_CODE || this.gameState !== 'level2') return;
+        
+        // Update blink timer
+        this.morseBlinkTimer += this.deltaTime;
+        if (this.morseBlinkTimer >= this.morseBlinkSpeed) {
+            this.morseBlinkState = !this.morseBlinkState;
+            this.morseBlinkTimer = 0;
+        }
+        
+        // Only draw when blink state is true
+        if (!this.morseBlinkState) return;
+        
+        const morse = this.textToMorse(this.morseMessage);
+        const dotSize = 8;
+        const dashLength = dotSize * 3;
+        const spacing = dotSize;
+        const charSpacing = dotSize * 3;
+        const wordSpacing = dotSize * 7;
+        
+        // Position the morse code sign at the top of the screen
+        let x = 50;
+        const y = 80;
+        
+        this.ctx.fillStyle = '#ffcc00';
+        
+        // Draw morse code
+        for (let i = 0; i < morse.length; i++) {
+            const symbol = morse[i];
+            
+            if (symbol === '.') {
+                // Draw dot
+                this.ctx.beginPath();
+                this.ctx.arc(x + dotSize/2, y, dotSize/2, 0, Math.PI * 2);
+                this.ctx.fill();
+                x += dotSize + spacing;
+            } else if (symbol === '-') {
+                // Draw dash
+                this.ctx.fillRect(x, y - dotSize/2, dashLength, dotSize);
+                x += dashLength + spacing;
+            } else if (symbol === ' ') {
+                // Character spacing
+                x += charSpacing;
+            } else if (symbol === '/') {
+                // Word spacing
+                x += wordSpacing;
+            }
+        }
+        
+        // Draw a small label to hint at the morse code
+        this.ctx.font = '12px Arial';
+        this.ctx.fillStyle = '#ffffff';
+        this.ctx.fillText('Morse Code:', 10, y);
     }
 
     gameLoop(timestamp) {
@@ -900,7 +1141,13 @@ class Game {
                 }
             }
             
-            this.fps = 1000 / deltaTime;
+            // Calculate FPS for debug display
+            this.fps = Math.round(1000 / deltaTime);
+            
+            // Limit delta time to prevent huge jumps after tab switch or lag
+            this.deltaTime = Math.min(deltaTime, 100);
+        } else {
+            this.deltaTime = 16.67; // Default to 60fps on first frame
         }
         
         this.lastFrameTime = timestamp;
@@ -908,12 +1155,19 @@ class Game {
         // Update frame counter for processing heavy effects
         this.skipFrameCount = (this.skipFrameCount + 1) % PROCESS_EVERY_N_FRAMES;
         
-        // Update and draw
+        // Update game state
         this.update();
+        
+        // Draw game
         this.draw();
         
-        // Request next frame
-        requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+        // Request next frame with performance optimization
+        if (window.requestAnimationFrame) {
+            requestAnimationFrame((timestamp) => this.gameLoop(timestamp));
+        } else {
+            // Fallback for older browsers
+            setTimeout(() => this.gameLoop(performance.now()), 1000 / MAX_FPS);
+        }
     }
 
     drawDebugInfo() {
@@ -925,10 +1179,36 @@ class Game {
             this.ctx.fillText(`Dog: ${Math.round(this.dog.x)}, ${Math.round(this.dog.y)}`, 10, 80);
         }
         
-        this.ctx.fillText(`Game State: ${this.gameState}`, 10, 100);
-        this.ctx.fillText(`Drain: ${Math.floor(this.colorPercentage * 100)}%`, 10, 120);
-        this.ctx.fillText(`Score: ${this.score}`, 10, 140);
-        this.ctx.fillText(`FPS: ${Math.round(this.fps)}`, 10, 160);
+        this.ctx.fillText(`FPS: ${Math.round(this.fps)}`, 10, 100);
+        this.ctx.fillText(`Game State: ${this.gameState}`, 10, 120);
+        this.ctx.fillText(`Drained: ${Math.round(this.colorPercentage)}%`, 10, 140);
+        this.ctx.fillText(`Lives: ${this.lives}`, 10, 160);
+        
+        // Show click debug info
+        if (this.clickDebugTimer > 0) {
+            this.ctx.fillStyle = 'yellow';
+            this.ctx.fillText(`Last Click: ${Math.round(this.lastClickX)}, ${Math.round(this.lastClickY)}`, 10, 180);
+            this.clickDebugTimer -= this.deltaTime;
+        }
+        
+        // Draw collision boxes
+        this.ctx.strokeStyle = 'red';
+        this.ctx.lineWidth = 1;
+        
+        // Player collision box
+        this.ctx.strokeRect(this.player.x, this.player.y, this.player.width, this.player.height);
+        
+        // Platform collision boxes
+        this.ctx.strokeStyle = 'green';
+        this.platforms.forEach(platform => {
+            this.ctx.strokeRect(platform.x, platform.y, platform.width, platform.height);
+        });
+        
+        // Laser collision boxes
+        this.ctx.strokeStyle = 'yellow';
+        this.lasers.forEach(laser => {
+            this.ctx.strokeRect(laser.x, laser.y, laser.width, laser.height);
+        });
     }
 
     checkLaserCollisions() {
