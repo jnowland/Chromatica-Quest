@@ -93,6 +93,75 @@ class UI {
         ctx.fillText('Drain the city of its color to restore the world', this.game.width / 2, this.game.height * 0.75);
     }
     
+    drawVictoryScreen() {
+        const ctx = this.game.ctx;
+        
+        // Semi-transparent overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(0, 0, this.game.width, this.game.height);
+        
+        // Victory message
+        ctx.font = 'bold 72px Arial';
+        ctx.fillStyle = '#FFD700'; // Gold color
+        ctx.textAlign = 'center';
+        ctx.fillText('YOU WIN!', this.game.width / 2, this.game.height * 0.3);
+        
+        // Score display
+        ctx.font = 'bold 32px Arial';
+        ctx.fillStyle = 'white';
+        ctx.fillText(`Final Score: ${this.game.score}`, this.game.width / 2, this.game.height * 0.4);
+        
+        // Completion message
+        ctx.font = '24px Arial';
+        ctx.fillStyle = '#8FBC8F'; // Light green
+        ctx.fillText(`You've drained ${Math.floor(this.game.colorPercentage * 100)}% of the city!`, 
+                    this.game.width / 2, this.game.height * 0.5);
+        
+        // Button dimensions
+        const buttonWidth = 200;
+        const buttonHeight = 60;
+        const buttonSpacing = 30;
+        const totalWidth = (buttonWidth * 2) + buttonSpacing;
+        const startX = (this.game.width - totalWidth) / 2;
+        const buttonY = this.game.height * 0.65;
+        
+        // Level 2 button
+        ctx.fillStyle = 'rgba(50, 150, 50, 0.8)'; // Green
+        ctx.fillRect(startX, buttonY, buttonWidth, buttonHeight);
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX, buttonY, buttonWidth, buttonHeight);
+        
+        ctx.font = 'bold 24px Arial';
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.fillText('Play Level 2', startX + buttonWidth/2, buttonY + 40);
+        
+        // Menu button
+        ctx.fillStyle = 'rgba(50, 50, 200, 0.8)'; // Blue
+        const menuButtonX = startX + buttonWidth + buttonSpacing;
+        ctx.fillRect(menuButtonX, buttonY, buttonWidth, buttonHeight);
+        ctx.strokeStyle = 'white';
+        ctx.strokeRect(menuButtonX, buttonY, buttonWidth, buttonHeight);
+        ctx.fillStyle = 'white';
+        ctx.fillText('Menu', menuButtonX + buttonWidth/2, buttonY + 40);
+        
+        // Store button positions for click handling
+        this.level2ButtonBounds = {
+            x: startX,
+            y: buttonY,
+            width: buttonWidth,
+            height: buttonHeight
+        };
+        
+        this.menuButtonBounds = {
+            x: menuButtonX,
+            y: buttonY,
+            width: buttonWidth,
+            height: buttonHeight
+        };
+    }
+    
     handleClick(clickX, clickY) {
         // Handle level select screen clicks
         if (this.game.gameState === 'levelSelect') {
@@ -105,6 +174,34 @@ class UI {
             if (clickX >= buttonX && clickX <= buttonX + buttonWidth &&
                 clickY >= buttonY && clickY <= buttonY + buttonHeight) {
                 this.game.gameState = 'playing';
+            }
+        }
+        // Handle victory screen clicks
+        else if (this.game.gameState === 'levelComplete') {
+            // Check if Level 2 button was clicked
+            if (this.level2ButtonBounds && 
+                clickX >= this.level2ButtonBounds.x && 
+                clickX <= this.level2ButtonBounds.x + this.level2ButtonBounds.width &&
+                clickY >= this.level2ButtonBounds.y && 
+                clickY <= this.level2ButtonBounds.y + this.level2ButtonBounds.height) {
+                // Start level 2
+                this.game.gameState = 'level2';
+                // Reset game state for level 2
+                this.game.initDrainMap();
+                this.game.createPlatforms();
+                this.game.createLasers();
+            }
+            // Check if Menu button was clicked
+            else if (this.menuButtonBounds && 
+                    clickX >= this.menuButtonBounds.x && 
+                    clickX <= this.menuButtonBounds.x + this.menuButtonBounds.width &&
+                    clickY >= this.menuButtonBounds.y && 
+                    clickY <= this.menuButtonBounds.y + this.menuButtonBounds.height) {
+                // Go back to menu
+                this.game.gameState = 'levelSelect';
+                // Reset game state
+                this.game.initDrainMap();
+                this.game.createPlatforms();
             }
         }
     }

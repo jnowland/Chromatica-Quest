@@ -318,24 +318,47 @@ class Game {
 
     setupInput() {
         window.addEventListener('keydown', (e) => {
-            if (e.key === 'ArrowLeft') this.player.speedX = -MOVE_SPEED;
-            if (e.key === 'ArrowRight') this.player.speedX = MOVE_SPEED;
-            
-            // Jump handling with double jump and jump buffering
-            if (e.key === ' ') {
-                // Set jump held state for variable jump height
-                this.player.isJumpHeld = true;
+            if (this.gameState === 'playing' || this.gameState === 'level2') {
+                if (e.key === 'ArrowLeft') this.player.speedX = -MOVE_SPEED;
+                if (e.key === 'ArrowRight') this.player.speedX = MOVE_SPEED;
                 
-                // Handle jump based on player state
-                if (!this.player.isJumping && (this.player.coyoteTime > 0 || this.player.onGround)) {
-                    // First jump - either on ground or within coyote time
-                    this.player.jump();
-                } else if (this.player.isJumping && this.player.jumpCount < this.player.maxJumps) {
-                    // Double jump - already jumping but haven't used all jumps
-                    this.player.jump();
-                } else if (!this.player.onGround && this.player.jumpCount >= this.player.maxJumps) {
-                    // Buffer the jump for when we land
-                    this.player.jumpBufferTime = this.player.maxJumpBufferTime;
+                // Jump handling with double jump and jump buffering
+                if (e.key === ' ') {
+                    // Set jump held state for variable jump height
+                    this.player.isJumpHeld = true;
+                    
+                    // Handle jump based on player state
+                    if (!this.player.isJumping && (this.player.coyoteTime > 0 || this.player.onGround)) {
+                        // First jump - either on ground or within coyote time
+                        this.player.jump();
+                    } else if (this.player.isJumping && this.player.jumpCount < this.player.maxJumps) {
+                        // Double jump - already jumping but haven't used all jumps
+                        this.player.jump();
+                    } else if (!this.player.onGround && this.player.jumpCount >= this.player.maxJumps) {
+                        // Buffer the jump for when we land
+                        this.player.jumpBufferTime = this.player.maxJumpBufferTime;
+                    }
+                }
+            } else if (this.gameState === 'levelComplete') {
+                // Handle keyboard navigation on victory screen
+                if (e.key === '1' || e.key === 'Enter') {
+                    // Start level 2
+                    this.gameState = 'level2';
+                    // Reset game state for level 2
+                    this.initDrainMap();
+                    this.createPlatforms();
+                    this.createLasers();
+                } else if (e.key === '2' || e.key === 'Escape') {
+                    // Go back to menu
+                    this.gameState = 'levelSelect';
+                    // Reset game state
+                    this.initDrainMap();
+                    this.createPlatforms();
+                }
+            } else if (this.gameState === 'levelSelect') {
+                // Start game on Enter or Space
+                if (e.key === 'Enter' || e.key === ' ') {
+                    this.gameState = 'playing';
                 }
             }
             
@@ -438,6 +461,11 @@ class Game {
             // Victory condition met
             if (this.gameState === 'playing') {
                 this.gameState = 'levelComplete';
+                
+                // Play victory sound if available
+                if (typeof Howl !== 'undefined' && this.sounds && this.sounds.victory) {
+                    this.sounds.victory.play();
+                }
             }
         }
     }
@@ -674,6 +702,12 @@ class Game {
 
         if (this.gameState === 'levelSelect') {
             this.ui.drawLevelSelect();
+        } else if (this.gameState === 'levelComplete') {
+            // Draw the background city first
+            this.drawCityWithColorDrainEffect();
+            
+            // Draw the victory screen on top
+            this.ui.drawVictoryScreen();
         } else {
             // Draw city with drain effect
             this.drawCityWithColorDrainEffect();
