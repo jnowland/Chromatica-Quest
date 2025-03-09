@@ -34,6 +34,13 @@ class Game {
             laserSpeed: 5,
             dogEnabled: true
         };
+        
+        // Lives system
+        this.lives = 3;
+        this.maxLives = 3;
+        this.invulnerable = false;
+        this.invulnerableTimer = 0;
+        this.invulnerableDuration = 1500; // 1.5 seconds of invulnerability after hit
 
         // Game entities
         this.player = new Player(this);
@@ -313,7 +320,56 @@ class Game {
     }
 
     createLasers() {
-        this.lasers.push(new Laser(100, 100, LASER_WIDTH, 200, 2, true, this.config.laserSpeed));
+        // Clear existing lasers
+        this.lasers = [];
+        
+        if (this.gameState === 'level2') {
+            // Create 5 lasers for level 2
+            
+            // Horizontal moving laser at the top
+            this.lasers.push(new Laser(
+                100, 150, 
+                200, LASER_WIDTH, 
+                1, true, this.config.laserSpeed, 
+                50, this.width - 250
+            ));
+            
+            // Horizontal moving laser in the middle
+            this.lasers.push(new Laser(
+                this.width - 300, this.height / 2, 
+                200, LASER_WIDTH, 
+                1, true, this.config.laserSpeed * 1.2, 
+                this.width / 2, this.width - 200
+            ));
+            
+            // Vertical moving laser on the left
+            this.lasers.push(new Laser(
+                200, 100, 
+                LASER_WIDTH, 300, 
+                2, true, this.config.laserSpeed * 0.8
+            ));
+            
+            // Vertical moving laser on the right
+            this.lasers.push(new Laser(
+                this.width - 200, this.height / 2 - 150, 
+                LASER_WIDTH, 300, 
+                2, true, this.config.laserSpeed
+            ));
+            
+            // Diagonal laser in the center (implemented as a horizontal laser that moves vertically)
+            this.lasers.push(new Laser(
+                this.width / 2 - 150, this.height / 2, 
+                300, LASER_WIDTH, 
+                2, true, this.config.laserSpeed * 1.5
+            ));
+        } else {
+            // Just one laser for level 1 (for testing)
+            this.lasers.push(new Laser(
+                -500, -500, // Off-screen
+                LASER_WIDTH, 200, 
+                2, false, 0
+            ));
+        }
     }
 
     setupInput() {
@@ -348,12 +404,39 @@ class Game {
                     this.initDrainMap();
                     this.createPlatforms();
                     this.createLasers();
+                    // Reset lives
+                    this.lives = this.maxLives;
                 } else if (e.key === '2' || e.key === 'Escape') {
                     // Go back to menu
                     this.gameState = 'levelSelect';
                     // Reset game state
                     this.initDrainMap();
                     this.createPlatforms();
+                }
+            } else if (this.gameState === 'gameOver') {
+                // Handle keyboard navigation on game over screen
+                if (e.key === '1' || e.key === 'Enter') {
+                    // Try again
+                    this.gameState = 'level2';
+                    // Reset game state
+                    this.initDrainMap();
+                    this.createPlatforms();
+                    this.createLasers();
+                    // Reset player position
+                    this.player.x = 50;
+                    this.player.y = 50;
+                    this.player.speedX = 0;
+                    this.player.speedY = 0;
+                    // Reset lives
+                    this.lives = this.maxLives;
+                } else if (e.key === '2' || e.key === 'Escape') {
+                    // Go back to menu
+                    this.gameState = 'levelSelect';
+                    // Reset game state
+                    this.initDrainMap();
+                    this.createPlatforms();
+                    // Reset lives
+                    this.lives = this.maxLives;
                 }
             } else if (this.gameState === 'levelSelect') {
                 // Start game on Enter or Space
@@ -684,7 +767,15 @@ class Game {
     }
 
     update() {
+        // Calculate delta time for time-based updates
+        const now = Date.now();
+        const deltaTime = now - (this.lastUpdateTime || now);
+        this.lastUpdateTime = now;
+        
         if (this.gameState === 'playing' || this.gameState === 'level2') {
+            // Update invulnerability status
+            this.updateInvulnerability(deltaTime);
+            
             this.player.update();
             
             if (this.dog) {
@@ -692,6 +783,11 @@ class Game {
             }
             
             this.lasers.forEach(laser => laser.update && laser.update());
+            
+            // Check for laser collisions in level 2
+            if (this.gameState === 'level2') {
+                this.checkLaserCollisions();
+            }
             
             // Update drain effect
             this.updateDrainMap();
@@ -709,6 +805,12 @@ class Game {
             
             // Draw the victory screen on top
             this.ui.drawVictoryScreen();
+        } else if (this.gameState === 'gameOver') {
+            // Draw the background city first
+            this.drawCityWithColorDrainEffect();
+            
+            // Draw the game over screen on top
+            this.ui.drawGameOverScreen();
         } else {
             // Draw city with drain effect
             this.drawCityWithColorDrainEffect();
@@ -723,8 +825,10 @@ class Game {
                 laser.draw && laser.draw(this.ctx);
             });
 
-            // Draw player
-            this.player.draw(this.ctx);
+            // Draw player (blinking when invulnerable)
+            if (!this.invulnerable || Math.floor(Date.now() / 200) % 2 === 0) {
+                this.player.draw(this.ctx);
+            }
 
             // Draw dog AFTER player to ensure it's on top
             if (this.dog) {
@@ -738,6 +842,47 @@ class Game {
             
             // Draw UI on top
             this.ui.drawUI();
+            
+            // Draw lives
+            this.drawLives();
+        }
+    }
+
+    drawLives() {
+        const lifeSize = 20;
+        const spacing = 5;
+        const startX = 10;
+        const startY = 50;
+        
+        this.ctx.fillStyle = 'red';
+        for (let i = 0; i < this.lives; i++) {
+            // Draw a heart shape for each life
+            const x = startX + i * (lifeSize + spacing);
+            const y = startY;
+            
+            this.ctx.beginPath();
+            this.ctx.moveTo(x + lifeSize/2, y + lifeSize/5);
+            this.ctx.bezierCurveTo(
+                x + lifeSize/2, y, 
+                x, y, 
+                x, y + lifeSize/3
+            );
+            this.ctx.bezierCurveTo(
+                x, y + lifeSize/1.5, 
+                x + lifeSize/2, y + lifeSize, 
+                x + lifeSize/2, y + lifeSize
+            );
+            this.ctx.bezierCurveTo(
+                x + lifeSize/2, y + lifeSize, 
+                x + lifeSize, y + lifeSize/1.5, 
+                x + lifeSize, y + lifeSize/3
+            );
+            this.ctx.bezierCurveTo(
+                x + lifeSize, y, 
+                x + lifeSize/2, y, 
+                x + lifeSize/2, y + lifeSize/5
+            );
+            this.ctx.fill();
         }
     }
 
@@ -784,5 +929,57 @@ class Game {
         this.ctx.fillText(`Drain: ${Math.floor(this.colorPercentage * 100)}%`, 10, 120);
         this.ctx.fillText(`Score: ${this.score}`, 10, 140);
         this.ctx.fillText(`FPS: ${Math.round(this.fps)}`, 10, 160);
+    }
+
+    checkLaserCollisions() {
+        if (this.gameState !== 'level2' || this.invulnerable) return false;
+        
+        const playerCenterX = this.player.x + this.player.width / 2;
+        const playerCenterY = this.player.y + this.player.height / 2;
+        
+        // Check collision with each laser
+        for (const laser of this.lasers) {
+            // Simple rectangular collision detection
+            if (this.player.x < laser.x + laser.width &&
+                this.player.x + this.player.width > laser.x &&
+                this.player.y < laser.y + laser.height &&
+                this.player.y + this.player.height > laser.y) {
+                
+                // Player hit a laser
+                this.handleLaserHit();
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    handleLaserHit() {
+        // Reduce lives
+        this.lives--;
+        
+        // Make player invulnerable temporarily
+        this.invulnerable = true;
+        this.invulnerableTimer = this.invulnerableDuration;
+        
+        // Check if game over
+        if (this.lives <= 0) {
+            this.gameState = 'gameOver';
+        } else {
+            // Reset player position
+            this.player.x = 50;
+            this.player.y = 50;
+            this.player.speedX = 0;
+            this.player.speedY = 0;
+        }
+    }
+    
+    updateInvulnerability(deltaTime) {
+        if (this.invulnerable) {
+            this.invulnerableTimer -= deltaTime;
+            if (this.invulnerableTimer <= 0) {
+                this.invulnerable = false;
+            }
+        }
     }
 } 

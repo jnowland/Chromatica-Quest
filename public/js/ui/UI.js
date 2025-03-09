@@ -162,6 +162,75 @@ class UI {
         };
     }
     
+    drawGameOverScreen() {
+        const ctx = this.game.ctx;
+        
+        // Semi-transparent overlay
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.fillRect(0, 0, this.game.width, this.game.height);
+        
+        // Game Over message
+        ctx.font = 'bold 72px Arial';
+        ctx.fillStyle = '#FF0000'; // Red color
+        ctx.textAlign = 'center';
+        ctx.fillText('GAME OVER', this.game.width / 2, this.game.height * 0.3);
+        
+        // Score display
+        ctx.font = 'bold 32px Arial';
+        ctx.fillStyle = 'white';
+        ctx.fillText(`Final Score: ${this.game.score}`, this.game.width / 2, this.game.height * 0.4);
+        
+        // Failure message
+        ctx.font = '24px Arial';
+        ctx.fillStyle = '#FF9999'; // Light red
+        ctx.fillText(`You were hit by too many lasers!`, 
+                    this.game.width / 2, this.game.height * 0.5);
+        
+        // Button dimensions
+        const buttonWidth = 200;
+        const buttonHeight = 60;
+        const buttonSpacing = 30;
+        const totalWidth = (buttonWidth * 2) + buttonSpacing;
+        const startX = (this.game.width - totalWidth) / 2;
+        const buttonY = this.game.height * 0.65;
+        
+        // Try Again button
+        ctx.fillStyle = 'rgba(50, 150, 50, 0.8)'; // Green
+        ctx.fillRect(startX, buttonY, buttonWidth, buttonHeight);
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(startX, buttonY, buttonWidth, buttonHeight);
+        
+        ctx.font = 'bold 24px Arial';
+        ctx.fillStyle = 'white';
+        ctx.textAlign = 'center';
+        ctx.fillText('Try Again', startX + buttonWidth/2, buttonY + 40);
+        
+        // Menu button
+        ctx.fillStyle = 'rgba(50, 50, 200, 0.8)'; // Blue
+        const menuButtonX = startX + buttonWidth + buttonSpacing;
+        ctx.fillRect(menuButtonX, buttonY, buttonWidth, buttonHeight);
+        ctx.strokeStyle = 'white';
+        ctx.strokeRect(menuButtonX, buttonY, buttonWidth, buttonHeight);
+        ctx.fillStyle = 'white';
+        ctx.fillText('Menu', menuButtonX + buttonWidth/2, buttonY + 40);
+        
+        // Store button positions for click handling
+        this.tryAgainButtonBounds = {
+            x: startX,
+            y: buttonY,
+            width: buttonWidth,
+            height: buttonHeight
+        };
+        
+        this.gameOverMenuButtonBounds = {
+            x: menuButtonX,
+            y: buttonY,
+            width: buttonWidth,
+            height: buttonHeight
+        };
+    }
+    
     handleClick(clickX, clickY) {
         // Handle level select screen clicks
         if (this.game.gameState === 'levelSelect') {
@@ -190,6 +259,8 @@ class UI {
                 this.game.initDrainMap();
                 this.game.createPlatforms();
                 this.game.createLasers();
+                // Reset lives
+                this.game.lives = this.game.maxLives;
             }
             // Check if Menu button was clicked
             else if (this.menuButtonBounds && 
@@ -202,6 +273,43 @@ class UI {
                 // Reset game state
                 this.game.initDrainMap();
                 this.game.createPlatforms();
+            }
+        }
+        // Handle game over screen clicks
+        else if (this.game.gameState === 'gameOver') {
+            // Check if Try Again button was clicked
+            if (this.tryAgainButtonBounds && 
+                clickX >= this.tryAgainButtonBounds.x && 
+                clickX <= this.tryAgainButtonBounds.x + this.tryAgainButtonBounds.width &&
+                clickY >= this.tryAgainButtonBounds.y && 
+                clickY <= this.tryAgainButtonBounds.y + this.tryAgainButtonBounds.height) {
+                // Restart level 2
+                this.game.gameState = 'level2';
+                // Reset game state
+                this.game.initDrainMap();
+                this.game.createPlatforms();
+                this.game.createLasers();
+                // Reset player position
+                this.game.player.x = 50;
+                this.game.player.y = 50;
+                this.game.player.speedX = 0;
+                this.game.player.speedY = 0;
+                // Reset lives
+                this.game.lives = this.game.maxLives;
+            }
+            // Check if Menu button was clicked
+            else if (this.gameOverMenuButtonBounds && 
+                    clickX >= this.gameOverMenuButtonBounds.x && 
+                    clickX <= this.gameOverMenuButtonBounds.x + this.gameOverMenuButtonBounds.width &&
+                    clickY >= this.gameOverMenuButtonBounds.y && 
+                    clickY <= this.gameOverMenuButtonBounds.y + this.gameOverMenuButtonBounds.height) {
+                // Go back to menu
+                this.game.gameState = 'levelSelect';
+                // Reset game state
+                this.game.initDrainMap();
+                this.game.createPlatforms();
+                // Reset lives
+                this.game.lives = this.game.maxLives;
             }
         }
     }
