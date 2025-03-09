@@ -90,7 +90,7 @@ class UI {
         ctx.font = '16px Arial';
         ctx.fillStyle = 'rgba(200, 200, 200, 0.9)';
         ctx.fillText('Use arrow keys to move, space to jump', this.game.width / 2, this.game.height * 0.7);
-        ctx.fillText('Collect color orbs and drain the city of its color', this.game.width / 2, this.game.height * 0.75);
+        ctx.fillText('Drain the city of its color to restore the world', this.game.width / 2, this.game.height * 0.75);
     }
     
     handleClick(clickX, clickY) {

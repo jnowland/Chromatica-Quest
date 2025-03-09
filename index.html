@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Chromatica Quest</title>
     <link rel="stylesheet" href="style.css">
-    <script src="node_modules/howler/dist/howler.min.js"></script>
+    <!-- Use CDN for Howler.js instead of node_modules -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
     
     <!-- Include game utilities -->
     <script src="public/js/utils/Constants.js"></script>
@@ -35,9 +36,6 @@
     </div>
     <div class="game-container">
         <canvas id="gameCanvas"></canvas>
-        <div class="ui-overlay">
-            <div id="score">Colors Collected: 0</div>
-        </div>
     </div>
 </body>
 </html> 
