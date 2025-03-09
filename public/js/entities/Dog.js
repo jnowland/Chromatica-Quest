@@ -227,11 +227,8 @@ class Dog {
         // Restore context
         ctx.restore();
         
-        // Debug info
+        // Debug info - only show position text, not hit box
         if (this.game.showDebug) {
-            ctx.strokeStyle = 'red';
-            ctx.strokeRect(this.x, this.y, this.width, this.height);
-            
             ctx.font = '12px Arial';
             ctx.fillStyle = 'white';
             ctx.fillText(`Dog: ${Math.floor(this.x)},${Math.floor(this.y)}`, this.x, this.y - 5);
